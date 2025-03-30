@@ -1,11 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace
-    _Csharpified.UI
+﻿namespace UI
 {
     public static class ConsoleUI
     {
@@ -29,7 +22,7 @@ namespace
         }
         public static void PrintMenuFooter(string prompt = "Choose option") => Console.Write($"{T_BottomLeft}{T_Horz}{T_Horz}{T_Horz}[?] {prompt}: ");
 
-        public static string Truncate(string? value, int maxLength = 30) => string.IsNullOrEmpty(value) ? string.Empty : (value.Length <= maxLength ? value : value.Substring(0, maxLength) + "...");
+        public static string Truncate(string? value, int maxLength = 30) => string.IsNullOrEmpty(value) ? string.Empty : value.Length <= maxLength ? value : value.Substring(0, maxLength) + "...";
 
         public static void WriteLineInsideBox(string message) => Console.WriteLine($"{T_Vertical}   {message}");
         public static void WriteErrorLine(string message) => Console.WriteLine($"{T_Vertical}   [!] {message}");

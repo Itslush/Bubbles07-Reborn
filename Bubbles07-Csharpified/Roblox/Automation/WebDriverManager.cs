@@ -1,14 +1,9 @@
 ﻿using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Support.UI;
 using OpenQA.Selenium;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using _Csharpified.Models;
-namespace
-    _Csharpified.Roblox.Automation
+using Models;
+
+namespace Roblox.Automation
 {
     public class WebDriverManager
     {
@@ -32,7 +27,7 @@ namespace
                 options.AddArgument("--disable-extensions");
                 options.AddArgument("--no-sandbox");
                 options.AddArgument("--disable-dev-shm-usage");
-                options.AddArgument("--window-size=1920,1080");
+                options.AddArgument("--window-size=400,400");
                 options.AddArgument("--log-level=3");
                 options.AddExcludedArgument("enable-logging");
                 options.AddExcludedArgument("enable-automation");

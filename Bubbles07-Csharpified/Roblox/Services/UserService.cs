@@ -1,13 +1,9 @@
-﻿using _Csharpified.Roblox.Http;
-using Newtonsoft.Json.Linq;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using _Csharpified.Models;
-namespace
-    _Csharpified.Roblox.Services
+﻿using Newtonsoft.Json.Linq;
+using Models;
+using Roblox.Http;
+using _Csharpified;
+
+namespace Roblox.Services
 {
     public class UserService
     {

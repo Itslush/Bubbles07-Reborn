@@ -1,11 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace
-    _Csharpified.Roblox.Http
+﻿namespace Roblox.Http
 {
     public static class HttpRequestMessageExtensions
     {
@@ -30,13 +23,13 @@ namespace
             }
 
             clone.Version = req.Version;
- 
-        #if NET5_0_OR_GREATER
+
+#if NET5_0_OR_GREATER
             foreach (KeyValuePair<string, object?> option in req.Options)
             {
                 if (option.Value != null) clone.Options.Set(new HttpRequestOptionsKey<object>(option.Key), option.Value);
             }
-        #endif
+#endif
 
             foreach (KeyValuePair<string, IEnumerable<string>> header in req.Headers)
             {

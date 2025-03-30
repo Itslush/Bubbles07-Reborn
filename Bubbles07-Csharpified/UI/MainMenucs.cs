@@ -1,17 +1,13 @@
-﻿using _Csharpified.Core;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using _Csharpified;
+using Core;
+using Models;
 
-namespace
-    _Csharpified.UI
+namespace UI
 {
     public class MainMenu
     {
         private readonly AccountManager _accountManager;
-        private readonly ActionsMenu _actionsMenu; // Dependency for sub-menu
+        private readonly ActionsMenu _actionsMenu;
 
         public MainMenu(AccountManager accountManager, ActionsMenu actionsMenu)
         {
@@ -33,9 +29,10 @@ namespace
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"2. Import Cookies (Bulk Paste)"));
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"3. List Accounts (Show Roster - {totalAccounts} loaded)"));
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"4. Select/Deselect (Toggle Selection - {selectedCount} selected)"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"5. Show Selected"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"6. Actions Menu (Execute Tasks on Selected)"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"7. Adjust Rate Limits (API={AppConfig.CurrentApiDelayMs}ms, Friend={AppConfig.CurrentFriendActionDelayMs}ms)"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"5. Show Accounts with Cookies"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"6. Show Selected"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"7. Actions Menu (Execute Tasks on Selected)"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"8. Adjust Rate Limits (API={AppConfig.CurrentApiDelayMs}ms, Friend={AppConfig.CurrentFriendActionDelayMs}ms)"));
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_End, $"0. Exit"));
 
                 ConsoleUI.PrintMenuFooter();
@@ -47,12 +44,13 @@ namespace
                     case "2": await ImportCookiesFromInputUI(); break;
                     case "3": ListAccountsUI(); break;
                     case "4": SelectAccountsUI(); break;
-                    case "5": ShowSelectedAccountsUI(); break;
-                    case "6":
+                    case "5": ShowAccountsWithCookiesUI(); break;
+                    case "6": ShowSelectedAccountsUI(); break;
+                    case "7": // Renumbered
                         if (selectedCount == 0) { ConsoleUI.WriteErrorLine("No accounts selected. Use option 4 first."); }
-                        else { await _actionsMenu.Show(); } // Call the sub-menu
+                        else { await _actionsMenu.Show(); }
                         break;
-                    case "7": _actionsMenu.AdjustRateLimitsUI(); break; // Delegate rate limit UI to ActionsMenu or a dedicated class
+                    case "8": ActionsMenu.AdjustRateLimitsUI(); break;
                     case "0": exit = true; break;
                     default: ConsoleUI.WriteErrorLine("Invalid choice. Please enter a number from the menu."); break;
                 }
@@ -72,6 +70,7 @@ namespace
             {
                 Console.WriteLine($"[!] Input empty. Aborting.");
             }
+            await Task.Delay(200);
         }
 
         private async Task ImportCookiesFromInputUI()
@@ -102,6 +101,7 @@ namespace
             {
                 Console.WriteLine($"[!] No valid, unique cookies provided for import.");
             }
+            await Task.Delay(200);
         }
 
         private void ListAccountsUI()
@@ -114,9 +114,32 @@ namespace
             for (int i = 0; i < accounts.Count; i++)
             {
                 string selectionMarker = selectedIndices.Contains(i) ? "[*]" : "[ ]";
-                Console.WriteLine($"{selectionMarker} {i + 1}: {accounts[i]}");
+                var status = _accountManager.GetVerificationStatus(accounts[i].UserId);
+                string statusMarker = status switch
+                {
+                    VerificationStatus.Passed => "(PASS)",
+                    VerificationStatus.Failed => "(FAIL)",
+                    VerificationStatus.Error => "(ERR)",
+                    _ => ""
+                };
+                Console.WriteLine($"{selectionMarker} {i + 1}: {accounts[i]} {statusMarker}");
             }
+            Console.WriteLine($"----------------------------------");
             Console.WriteLine($"Use option 4 to select/deselect accounts for actions.");
+        }
+
+        private void ShowAccountsWithCookiesUI()
+        {
+            var accounts = _accountManager.GetAllAccounts();
+            Console.WriteLine($"\n---[ Accounts with Cookies ({accounts.Count} Total) ]---");
+            if (accounts.Count == 0) { Console.WriteLine($"No accounts loaded."); return; }
+
+            for (int i = 0; i < accounts.Count; i++)
+            {
+                Console.WriteLine($"{i + 1}: User: {accounts[i].Username} (ID: {accounts[i].UserId})");
+                Console.WriteLine($"   Cookie: {ConsoleUI.Truncate(accounts[i].Cookie, 70)}");
+            }
+            Console.WriteLine($"----------------------------------");
         }
 
         private void SelectAccountsUI()
@@ -151,7 +174,7 @@ namespace
                 {
                     if (int.TryParse(indexStr, out int userIndex))
                     {
-                        numericIndices.Add(userIndex); // Keep 1-based for manager
+                        numericIndices.Add(userIndex);
                     }
                     else { Console.WriteLine($"[!] Invalid input format: '{indexStr}'. Skipped."); invalidNum++; }
                 }
@@ -160,9 +183,13 @@ namespace
                 {
                     _accountManager.UpdateSelection(numericIndices);
                 }
-                else if (invalidNum == indices.Length)
+                else if (invalidNum == indices.Length && indices.Length > 0)
                 {
                     Console.WriteLine($"[!] No valid numbers entered. Selection unchanged.");
+                }
+                else if (indices.Length == 0 && !string.IsNullOrWhiteSpace(input))
+                {
+                    Console.WriteLine($"[!] Unrecognized command or invalid input. Selection unchanged.");
                 }
             }
             ShowSelectedAccountsUI();
@@ -176,7 +203,18 @@ namespace
             if (selectedIndices.Count == 0) { Console.WriteLine($"None selected. Use option 4 to select accounts."); return; }
             foreach (int index in selectedIndices.OrderBy(i => i))
             {
-                if (index >= 0 && index < allAccounts.Count) { Console.WriteLine($" {index + 1}: {allAccounts[index]}"); }
+                if (index >= 0 && index < allAccounts.Count)
+                {
+                    var status = _accountManager.GetVerificationStatus(allAccounts[index].UserId);
+                    string statusMarker = status switch
+                    {
+                        VerificationStatus.Passed => "(PASS)",
+                        VerificationStatus.Failed => "(FAIL)",
+                        VerificationStatus.Error => "(ERR)",
+                        _ => ""
+                    };
+                    Console.WriteLine($" {index + 1}: {allAccounts[index]} {statusMarker}");
+                }
                 else { Console.WriteLine($" [!] Error: Selected index {index} is out of bounds."); }
             }
             Console.WriteLine($"----------------------------------");

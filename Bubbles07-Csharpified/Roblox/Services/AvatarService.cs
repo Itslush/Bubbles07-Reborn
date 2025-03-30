@@ -1,15 +1,11 @@
-﻿using _Csharpified.Roblox.Http;
-using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
-using _Csharpified.Models;
+using Models;
+using Roblox.Http;
+using _Csharpified;
 
-namespace
-    _Csharpified.Roblox.Services
+namespace Roblox.Services
 {
     public class AvatarService
     {
@@ -88,28 +84,32 @@ namespace
                 return success;
             }
 
-            if (!await ExecuteAvatarStep(async () => {
+            if (!await ExecuteAvatarStep(async () =>
+            {
                 string url = "https://avatar.roblox.com/v1/avatar/set-body-colors";
-                var content = new StringContent(bodyColors.ToString(), System.Text.Encoding.UTF8, "application/json");
+                var content = new StringContent(bodyColors.ToString(), Encoding.UTF8, "application/json");
                 return await _robloxHttpClient.SendRequestAsync(HttpMethod.Post, url, account, content, "Set Body Colors");
             }, "Set Body Colors")) return false;
 
-            if (!await ExecuteAvatarStep(async () => {
+            if (!await ExecuteAvatarStep(async () =>
+            {
                 string url = "https://avatar.roblox.com/v1/avatar/set-player-avatar-type";
                 var payloadJson = new JObject { ["playerAvatarType"] = playerAvatarType };
-                var content = new StringContent(payloadJson.ToString(), System.Text.Encoding.UTF8, "application/json");
+                var content = new StringContent(payloadJson.ToString(), Encoding.UTF8, "application/json");
                 return await _robloxHttpClient.SendRequestAsync(HttpMethod.Post, url, account, content, "Set Avatar Type");
             }, "Set Avatar Type")) return false;
 
-            if (!await ExecuteAvatarStep(async () => {
+            if (!await ExecuteAvatarStep(async () =>
+            {
                 string url = "https://avatar.roblox.com/v1/avatar/set-scales";
-                var content = new StringContent(scales.ToString(), System.Text.Encoding.UTF8, "application/json");
+                var content = new StringContent(scales.ToString(), Encoding.UTF8, "application/json");
                 return await _robloxHttpClient.SendRequestAsync(HttpMethod.Post, url, account, content, "Set Scales");
             }, "Set Scales")) return false;
 
-            if (!await ExecuteAvatarStep(async () => {
+            if (!await ExecuteAvatarStep(async () =>
+            {
                 string url = "https://avatar.roblox.com/v1/avatar/set-wearing-assets";
-                var content = new StringContent(wearPayload.ToString(), System.Text.Encoding.UTF8, "application/json");
+                var content = new StringContent(wearPayload.ToString(), Encoding.UTF8, "application/json");
                 return await _robloxHttpClient.SendRequestAsync(HttpMethod.Post, url, account, content, "Set Wearing Assets");
             }, "Set Wearing Assets")) return false;
 

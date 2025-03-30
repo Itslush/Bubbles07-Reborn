@@ -1,13 +1,8 @@
-﻿using _Csharpified.Roblox.Http;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Threading.Tasks;
-using _Csharpified.Models;
-namespace
-    _Csharpified.Roblox.Services
+﻿using System.Net.Http.Headers;
+using Models;
+using Roblox.Http;
+
+namespace Roblox.Services
 {
     public class AuthenticationService
     {
@@ -58,7 +53,6 @@ namespace
             }
         }
 
-        // Kept here for,  it's auth-related.
         public async Task<string?> GetAuthenticationTicketAsync(Account account, string gameId)
         {
             if (string.IsNullOrEmpty(account.XcsrfToken) || string.IsNullOrWhiteSpace(account.Cookie))
@@ -131,7 +125,7 @@ namespace
         private static string TruncateForLog(string? value, int maxLength = 100)
         {
             if (string.IsNullOrEmpty(value)) return string.Empty;
-            return value.Length <= maxLength ? value : value.Substring(0, maxLength) + "...";
+            return value.Length <= maxLength ? value : value[..maxLength] + "...";
         }
     }
 }

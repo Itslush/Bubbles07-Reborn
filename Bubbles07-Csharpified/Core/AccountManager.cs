@@ -1,9 +1,8 @@
-﻿using _Csharpified.Roblox.Services;
-using System.Diagnostics;
+﻿using System.Diagnostics;
+using Models;
+using Roblox.Services;
 
-using _Csharpified.Models;
-
-namespace _Csharpified.Core
+namespace Core
 {
     public class AccountManager
     {
@@ -11,7 +10,7 @@ namespace _Csharpified.Core
         private readonly List<int> _selectedAccountIndices = new List<int>();
         private readonly Dictionary<long, VerificationStatus> _lastVerificationResults = new Dictionary<long, VerificationStatus>();
         private readonly AuthenticationService _authService;
-        private readonly object _lock = new object(); // Lock for thread safety
+        private readonly Lock _lock = new();
 
         public AccountManager(AuthenticationService authService)
         {
@@ -30,7 +29,6 @@ namespace _Csharpified.Core
         {
             lock (_lock)
             {
-                // Return a copy to prevent external modification
                 return new List<int>(_selectedAccountIndices);
             }
         }
@@ -82,7 +80,6 @@ namespace _Csharpified.Core
 
                 lock (_lock)
                 {
-                    // Double check for race condition before adding
                     if (!_accounts.Any(a => a.Cookie == newAccount.Cookie))
                     {
                         _accounts.Add(newAccount);
@@ -90,7 +87,7 @@ namespace _Csharpified.Core
                     else
                     {
                         Console.WriteLine("[!] Duplicate: Cookie added by another thread concurrently.");
-                        return false; // Indicate it wasn't added by *this* call
+                        return false;
                     }
                 }
 
@@ -128,7 +125,8 @@ namespace _Csharpified.Core
                     int currentIndex = i;
                     string cookie = cookiesToImport[currentIndex];
 
-                    tasks.Add(Task.Run(async () => {
+                    tasks.Add(Task.Run(async () =>
+                    {
                         try
                         {
                             Console.Write($"[{currentIndex + 1}/{cookiesToImport.Count}] Processing {TruncateForLog(cookie, 20)}... ");
@@ -193,7 +191,7 @@ namespace _Csharpified.Core
                     }
                 }
                 if (toggledOn > 0 || toggledOff > 0) Console.WriteLine($"[*] Selection updated: +{toggledOn} selected, -{toggledOff} deselected.");
-                // Ensure uniqueness and order after modification
+
                 var distinctSorted = _selectedAccountIndices.Distinct().OrderBy(i => i).ToList();
                 _selectedAccountIndices.Clear();
                 _selectedAccountIndices.AddRange(distinctSorted);
@@ -269,7 +267,7 @@ namespace _Csharpified.Core
             lock (_lock)
             {
                 _lastVerificationResults.TryGetValue(userId, out var status);
-                return status; // Defaults to NotChecked if not found
+                return status;
             }
         }
 
@@ -292,7 +290,7 @@ namespace _Csharpified.Core
         private static string TruncateForLog(string? value, int maxLength = 30)
         {
             if (string.IsNullOrEmpty(value)) return string.Empty;
-            return value.Length <= maxLength ? value : value.Substring(0, maxLength) + "...";
+            return value.Length <= maxLength ? value : string.Concat(value.AsSpan(0, maxLength), "...");
         }
     }
 }

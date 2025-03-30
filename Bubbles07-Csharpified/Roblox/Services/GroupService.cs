@@ -1,12 +1,7 @@
-﻿using _Csharpified.Roblox.Http;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using _Csharpified.Models;
-namespace
-    _Csharpified.Roblox.Services
+﻿using _Csharpified;
+using Models;
+using Roblox.Http;
+namespace Roblox.Services
 {
     public class GroupService
     {

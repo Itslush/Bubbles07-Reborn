@@ -1,12 +1,8 @@
 ﻿using Newtonsoft.Json.Linq;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using _Csharpified.Models;
-namespace
-    _Csharpified.Roblox.Http
+using Models;
+using _Csharpified;
+
+namespace Roblox.Http
 {
     public class RobloxHttpClient
     {
@@ -150,7 +146,7 @@ namespace
                 if (response.IsSuccessStatusCode)
                 {
                     string jsonString = await response.Content.ReadAsStringAsync();
-                    var accountInfo = Newtonsoft.Json.Linq.JObject.Parse(jsonString);
+                    var accountInfo = JObject.Parse(jsonString);
                     long userId = accountInfo["id"]?.Value<long>() ?? 0;
                     string username = accountInfo["name"]?.Value<string>() ?? "N/A";
                     if (userId > 0 && username != "N/A")
