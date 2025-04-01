@@ -2,7 +2,7 @@
 {
     public enum VerificationStatus
     {
-        NotChecked,
+        NotChecked = 0,
         Passed,
         Failed,
         Error

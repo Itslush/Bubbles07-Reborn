@@ -1,4 +1,6 @@
-﻿namespace UI
+﻿using System;
+
+namespace UI
 {
     public static class ConsoleUI
     {
@@ -13,21 +15,54 @@
         public const string T_HorzBar = "─";
 
         public static string TreeLine(string connector, string content) => $"{T_Vertical}   {connector}{T_Horz} {content}";
+
         public static void PrintMenuTitle(string title)
         {
-            string line = new string(T_HorzBar[0], title.Length + 4);
+            int width = Math.Max(title.Length + 4, 50);
+            string line = new string(T_HorzBar[0], width);
+            int totalPadding = width - title.Length;
+            int leftPadding = totalPadding / 2;
+            int rightPadding = totalPadding - leftPadding;
+
             Console.WriteLine($"\n{T_TopLeft}{line}{T_TopRight}");
-            Console.WriteLine($"{T_Vertical}  {title}  {T_Vertical}");
+            Console.WriteLine($"{T_Vertical}{new string(' ', leftPadding)}{title}{new string(' ', rightPadding)}{T_Vertical}");
             Console.WriteLine($"{T_Vertical}{line}{T_Vertical}");
         }
-        public static void PrintMenuFooter(string prompt = "Choose option") => Console.Write($"{T_BottomLeft}{T_Horz}{T_Horz}{T_Horz}[?] {prompt}: ");
 
-        public static string Truncate(string? value, int maxLength = 30) => string.IsNullOrEmpty(value) ? string.Empty : value.Length <= maxLength ? value : value.Substring(0, maxLength) + "...";
+        public static void PrintMenuFooter(string prompt = "Choose option") => Console.Write($"{T_BottomLeft}{T_Horz}{T_Horz}[?] {prompt}: ");
+
+        public static string Truncate(string? value, int maxLength = 30)
+        {
+            if (string.IsNullOrEmpty(value)) return string.Empty;
+            maxLength = Math.Max(0, maxLength);
+            return value.Length <= maxLength ? value : value.Substring(0, maxLength) + "...";
+        }
 
         public static void WriteLineInsideBox(string message) => Console.WriteLine($"{T_Vertical}   {message}");
-        public static void WriteErrorLine(string message) => Console.WriteLine($"{T_Vertical}   [!] {message}");
-        public static void WriteSuccessLine(string message) => Console.WriteLine($"{T_Vertical}   [+] {message}");
-        public static void WriteInfoLine(string message) => Console.WriteLine($"{T_Vertical}   [*] {message}");
 
+        public static void WriteErrorLine(string message)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"{T_Vertical}   [!] {message}");
+            Console.ResetColor();
+        }
+        public static void WriteSuccessLine(string message)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"{T_Vertical}   [+] {message}");
+            Console.ResetColor();
+        }
+        public static void WriteInfoLine(string message)
+        {
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"{T_Vertical}   [*] {message}");
+            Console.ResetColor();
+        }
+        public static void WriteWarningLine(string message)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"{T_Vertical}   [?] {message}");
+            Console.ResetColor();
+        }
     }
 }

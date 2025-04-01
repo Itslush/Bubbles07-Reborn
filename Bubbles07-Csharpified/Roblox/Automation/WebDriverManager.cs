@@ -1,4 +1,6 @@
-﻿using OpenQA.Selenium.Chrome;
+﻿using System;
+using System.Threading.Tasks;
+using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Support.UI;
 using OpenQA.Selenium;
 using Models;
@@ -18,12 +20,14 @@ namespace Roblox.Automation
             {
                 var options = new ChromeOptions();
                 Console.WriteLine($"[>] Initializing WebDriver instance...");
+
                 if (headless || !Environment.UserInteractive || Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true")
                 {
                     Console.WriteLine($"[*] Configuring WebDriver :: Headless Mode Activated.");
                     options.AddArgument("--headless=new");
                     options.AddArgument("--disable-gpu");
                 }
+
                 options.AddArgument("--disable-extensions");
                 options.AddArgument("--no-sandbox");
                 options.AddArgument("--disable-dev-shm-usage");
@@ -46,6 +50,7 @@ namespace Roblox.Automation
                 Console.WriteLine($"[>] Navigating to Roblox.com to set cookie...");
                 driver.Navigate().GoToUrl("https://www.roblox.com/login");
                 Task.Delay(1000).Wait();
+
                 driver.Manage().Cookies.DeleteAllCookies();
                 Console.WriteLine($"[>] Purged existing browser cookies.");
 
@@ -69,13 +74,17 @@ namespace Roblox.Automation
 
                 try
                 {
-                    WebDriverWait wait = new WebDriverWait(driver, TimeSpan.FromSeconds(15));
-                    wait.Until(d => d.FindElement(By.Id("nav-robux-balance")) != null || d.FindElement(By.Id("nav-username")) != null);
+                    WebDriverWait wait = new(driver, TimeSpan.FromSeconds(15));
+                    wait.Until(d => d.FindElement(By.CssSelector("#nav-robux-balance, #nav-username")) != null);
                     Console.WriteLine($"[+] Login Confirmed via Page Element.");
                 }
                 catch (WebDriverTimeoutException)
                 {
                     Console.WriteLine($"[!] Warning: Could not confirm successful login via page element after setting cookie. Proceeding anyway.");
+                }
+                catch (NoSuchElementException)
+                {
+                    Console.WriteLine($"[!] Warning: Login confirmation element not found. Proceeding anyway.");
                 }
 
                 Console.WriteLine($"[+] Navigation Complete.");
@@ -85,9 +94,11 @@ namespace Roblox.Automation
             {
                 Console.WriteLine($"[!] WebDriver Initialization Error for {account.Username}: {ex.Message}");
                 if (ex.InnerException != null) Console.WriteLine($"[!] Inner Exception: {ex.InnerException.Message}");
+
                 if (ex is WebDriverException || ex.Message.ToLower().Contains("chromedriver"))
                 {
                     Console.WriteLine($"[?] Hint: Ensure 'chromedriver' (or 'chromedriver.exe') is in your system's PATH or the application's directory, is executable, and matches your installed Chrome browser version.");
+
                     if (OperatingSystem.IsWindows()) Console.WriteLine($"[?] Windows: Download from https://googlechromelabs.github.io/chrome-for-testing/ and place chromedriver.exe next to your program or in PATH.");
                     else if (OperatingSystem.IsLinux()) Console.WriteLine($"[?] Linux: Use package manager (e.g., 'sudo apt install chromium-chromedriver') or download and place in PATH, ensure executable ('chmod +x chromedriver').");
                     else if (OperatingSystem.IsMacOS()) Console.WriteLine($"[?] macOS: Use Homebrew ('brew install chromedriver') or download, place in PATH, and allow execution (System Preferences > Security & Privacy).");

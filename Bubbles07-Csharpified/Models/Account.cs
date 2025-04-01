@@ -1,4 +1,8 @@
-﻿namespace Models
+﻿using System;
+using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
+
+namespace Models
 {
     public class Account
     {
@@ -13,5 +17,14 @@
             string status = IsValid ? "[OK]" : "[!!]";
             return $"{status} ID: {UserId}, User: {Username}";
         }
+    }
+
+    public class AvatarDetails
+    {
+        public List<long> AssetIds { get; set; } = new List<long>();
+        public JObject? BodyColors { get; set; }
+        public string? PlayerAvatarType { get; set; }
+        public JObject? Scales { get; set; }
+        public DateTime FetchTime { get; set; } = DateTime.UtcNow;
     }
 }

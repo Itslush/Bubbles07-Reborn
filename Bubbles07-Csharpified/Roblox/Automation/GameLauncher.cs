@@ -1,6 +1,11 @@
-﻿using System.Diagnostics;
-using System.Web;
+﻿using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
+using System.Web;
 using Models;
 using _Csharpified;
 using Roblox.Services;
@@ -21,14 +26,22 @@ namespace Roblox.Automation
         private static string TruncateForLog(string? value, int maxLength = 100)
         {
             if (string.IsNullOrEmpty(value)) return string.Empty;
-            return value.Length <= maxLength ? value : value.Substring(0, maxLength) + "...";
+            return value.Length <= maxLength ? value.Substring(0, maxLength) + "..." : value;
         }
 
         public async Task LaunchGameForBadgesAsync(Account account, string gameId, int badgeGoal = AppConfig.DefaultBadgeGoal)
         {
-            if (string.IsNullOrEmpty(account.XcsrfToken) || string.IsNullOrWhiteSpace(account.Cookie))
+            if (string.IsNullOrWhiteSpace(account.Cookie))
             {
-                Console.WriteLine($"[-] Cannot GetBadges for {account.Username}: Missing XCSRF token or Cookie.");
+                Console.WriteLine($"[-] Cannot GetBadges for {account.Username}: Missing Cookie.");
+                return;
+            }
+
+            Console.WriteLine($"[*] Refreshing XCSRF for {account.Username} before getting auth ticket...");
+            bool tokenRefreshed = await _authService.RefreshXCSRFTokenIfNeededAsync(account);
+            if (!tokenRefreshed || string.IsNullOrEmpty(account.XcsrfToken))
+            {
+                Console.WriteLine($"[-] Failed to refresh XCSRF token for {account.Username}. Cannot proceed with game launch.");
                 return;
             }
 
@@ -50,6 +63,7 @@ namespace Roblox.Automation
 
             long browserTrackerId = Random.Shared.NextInt64(10_000_000_000L, 100_000_000_000L);
             long launchTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
             string placeLauncherUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame&browserTrackerId={browserTrackerId}&placeId={gameId}&isPlayTogetherGame=false&joinAttemptId={Guid.NewGuid()}&joinAttemptOrigin=PlayButton";
             string encodedPlaceLauncherUrl = HttpUtility.UrlEncode(placeLauncherUrl);
 
@@ -63,7 +77,6 @@ namespace Roblox.Automation
             launchUrlBuilder.Append("+gameLocale:en_us");
             string launchUrl = launchUrlBuilder.ToString();
 
-
             try
             {
                 Console.WriteLine($"[*] Dispatching launch command for Roblox Player...");
@@ -71,6 +84,7 @@ namespace Roblox.Automation
                 Process.Start(new ProcessStartInfo(launchUrl) { UseShellExecute = true });
                 Console.WriteLine($"[+] Launch command sent. The Roblox Player should start shortly.");
                 Console.WriteLine($"[!] Please complete any actions required in the game to earn badges (aiming for {badgeGoal}).");
+                await Task.Delay(2000);
             }
             catch (System.ComponentModel.Win32Exception ex)
             {
@@ -88,7 +102,6 @@ namespace Roblox.Automation
             }
 
             await _badgeService.MonitorBadgeAcquisitionAsync(account, badgeGoal);
-
             await TerminateRobloxProcessesAsync(account);
 
             Console.WriteLine($"[*] GetBadges action sequence finished for {account.Username}.");
@@ -96,6 +109,12 @@ namespace Roblox.Automation
 
         private async Task TerminateRobloxProcessesAsync(Account account)
         {
+            if (!Environment.UserInteractive)
+            {
+                Console.WriteLine("[*] Skipping automatic termination of Roblox processes in non-interactive mode.");
+                return;
+            }
+
             Console.WriteLine($"[*] Attempting automatic termination of Roblox Player instances...");
             int closedCount = 0;
             try
@@ -116,7 +135,6 @@ namespace Roblox.Automation
                     catch { return false; }
                 }).ToList();
 
-
                 if (robloxProcesses.Count == 0) { Console.WriteLine($"[-] No active Roblox Player processes found to terminate."); }
                 else
                 {
@@ -125,7 +143,6 @@ namespace Roblox.Automation
                     {
                         try
                         {
-                            // Double-check HasExited before attempting to kill
                             if (!process.HasExited)
                             {
                                 Console.Write($"   Killing {process.ProcessName} (PID: {process.Id})...");
@@ -138,7 +155,6 @@ namespace Roblox.Automation
                                 }
                                 else
                                 {
-                                    // Check if it exited despite WaitForExit timing out
                                     try { if (process.HasExited) { Console.WriteLine($" Terminated (late)."); closedCount++; } else { Console.WriteLine($" Still running?"); } } catch { Console.WriteLine(" Status Unknown."); }
                                 }
                             }

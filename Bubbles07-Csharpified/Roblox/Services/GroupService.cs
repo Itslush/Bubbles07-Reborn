@@ -1,6 +1,11 @@
-﻿using _Csharpified;
+﻿using System;
+using System.Net.Http;
+using System.Text;
+using System.Threading.Tasks;
+using _Csharpified;
 using Models;
 using Roblox.Http;
+
 namespace Roblox.Services
 {
     public class GroupService
@@ -20,14 +25,18 @@ namespace Roblox.Services
                 return false;
             }
             Console.WriteLine($"[*] Action: JoinGroup Target: {account.Username} Group: {groupId}");
-            string url = $"https://groups.roblox.com/v1/groups/{groupId}/users";
-            var content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+
+            string url = $"{AppConfig.RobloxApiBaseUrl_Groups}/v1/groups/{groupId}/users";
+            var content = new StringContent("{}", Encoding.UTF8, "application/json");
 
             bool success = await _robloxHttpClient.SendRequestAsync(
-                HttpMethod.Post, url, account, content, $"Join Group {groupId}"
+                HttpMethod.Post,
+                url,
+                account,
+                content,
+                $"Join Group {groupId}"
                 );
 
-            await Task.Delay(AppConfig.CurrentApiDelayMs);
             return success;
         }
     }

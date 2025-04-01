@@ -1,4 +1,9 @@
-﻿using System.Diagnostics;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Models;
 using Roblox.Services;
 
@@ -10,7 +15,7 @@ namespace Core
         private readonly List<int> _selectedAccountIndices = new List<int>();
         private readonly Dictionary<long, VerificationStatus> _lastVerificationResults = new Dictionary<long, VerificationStatus>();
         private readonly AuthenticationService _authService;
-        private readonly Lock _lock = new();
+        private readonly object _lock = new object();
 
         public AccountManager(AuthenticationService authService)
         {
@@ -99,7 +104,7 @@ namespace Core
                 else
                 {
                     Console.WriteLine($"[-] XCSRF Fetch Failed. Account added but marked as INVALID. Actions requiring XCSRF will fail.");
-                    return true; // Still added, but invalid
+                    return true;
                 }
             }
             else
@@ -182,8 +187,16 @@ namespace Core
                     if (userIndex >= 1 && userIndex <= _accounts.Count)
                     {
                         int zeroBasedIndex = userIndex - 1;
-                        if (_selectedAccountIndices.Contains(zeroBasedIndex)) { _selectedAccountIndices.Remove(zeroBasedIndex); toggledOff++; }
-                        else { _selectedAccountIndices.Add(zeroBasedIndex); toggledOn++; }
+                        if (_selectedAccountIndices.Contains(zeroBasedIndex))
+                        {
+                            _selectedAccountIndices.Remove(zeroBasedIndex);
+                            toggledOff++;
+                        }
+                        else
+                        {
+                            _selectedAccountIndices.Add(zeroBasedIndex);
+                            toggledOn++;
+                        }
                     }
                     else
                     {
@@ -222,7 +235,9 @@ namespace Core
             lock (_lock)
             {
                 _selectedAccountIndices.Clear();
-                _selectedAccountIndices.AddRange(_accounts.Select((a, i) => new { a, i }).Where(x => x.a.IsValid).Select(x => x.i));
+                _selectedAccountIndices.AddRange(_accounts.Select((a, i) => new { Account = a, Index = i })
+                                                      .Where(x => x.Account.IsValid)
+                                                      .Select(x => x.Index));
                 Console.WriteLine($"[*] All {_selectedAccountIndices.Count} valid accounts selected.");
             }
         }
@@ -232,7 +247,9 @@ namespace Core
             lock (_lock)
             {
                 _selectedAccountIndices.Clear();
-                _selectedAccountIndices.AddRange(_accounts.Select((a, i) => new { a, i }).Where(x => !x.a.IsValid).Select(x => x.i));
+                _selectedAccountIndices.AddRange(_accounts.Select((a, i) => new { Account = a, Index = i })
+                                                      .Where(x => !x.Account.IsValid)
+                                                      .Select(x => x.Index));
                 Console.WriteLine($"[*] All {_selectedAccountIndices.Count} invalid accounts selected.");
             }
         }
@@ -251,16 +268,21 @@ namespace Core
                 int count = 0;
                 for (int i = 0; i < _accounts.Count; i++)
                 {
-                    if (_lastVerificationResults.TryGetValue(_accounts[i].UserId, out var status) && (status == VerificationStatus.Failed || status == VerificationStatus.Error))
+                    if (_lastVerificationResults.TryGetValue(_accounts[i].UserId, out var status) &&
+                        (status == VerificationStatus.Failed || status == VerificationStatus.Error))
                     {
-                        _selectedAccountIndices.Add(i); count++;
+                        _selectedAccountIndices.Add(i);
+                        count++;
                     }
                 }
                 if (count > 0) { Console.WriteLine($"[*] Selected {count} accounts that failed or had errors in the last verification check."); }
                 else { Console.WriteLine("[!] No accounts failed or had errors in the last verification check."); }
+
+                var distinctSorted = _selectedAccountIndices.Distinct().OrderBy(i => i).ToList();
+                _selectedAccountIndices.Clear();
+                _selectedAccountIndices.AddRange(distinctSorted);
             }
         }
-
 
         public VerificationStatus GetVerificationStatus(long userId)
         {
@@ -290,7 +312,7 @@ namespace Core
         private static string TruncateForLog(string? value, int maxLength = 30)
         {
             if (string.IsNullOrEmpty(value)) return string.Empty;
-            return value.Length <= maxLength ? value : string.Concat(value.AsSpan(0, maxLength), "...");
+            return value.Length <= maxLength ? string.Concat(value.AsSpan(0, maxLength), "...") : value;
         }
     }
 }

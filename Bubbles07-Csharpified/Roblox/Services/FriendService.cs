@@ -1,5 +1,11 @@
-﻿using Newtonsoft.Json.Linq;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Text;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Models;
 using Roblox.Http;
 using _Csharpified;
@@ -17,6 +23,7 @@ namespace Roblox.Services
 
         private static string TruncateForLog(string? value, int maxLength = 100)
         {
+            maxLength = Math.Max(0, maxLength);
             if (string.IsNullOrEmpty(value)) return string.Empty;
             return value.Length <= maxLength ? value : value.Substring(0, maxLength) + "...";
         }
@@ -28,10 +35,8 @@ namespace Roblox.Services
                 Console.WriteLine($"[-] Cannot SendFriendRequest from {account.Username}: Missing XCSRF token.");
                 return false;
             }
-            Console.WriteLine($"[->] Sending Friend Request: {account.Username} -> {friendUsername} ({friendUserId})");
-            string url = $"https://friends.roblox.com/v1/users/{friendUserId}/request-friendship";
-            var content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
-
+            string url = $"{AppConfig.RobloxApiBaseUrl_Friends}/v1/users/{friendUserId}/request-friendship";
+            var content = new StringContent("{}", Encoding.UTF8, "application/json");
             bool success = await _robloxHttpClient.SendRequestAsync(
                 HttpMethod.Post, url, account, content, $"Send Friend Request to {friendUsername}"
                 );
@@ -45,38 +50,89 @@ namespace Roblox.Services
                 Console.WriteLine($"[-] Cannot AcceptFriendRequest for {account.Username}: Missing XCSRF token.");
                 return false;
             }
-            Console.WriteLine($"[<-] Accepting Friend Request: {friendUsername} ({friendUserId}) -> {account.Username}");
-            string url = $"https://friends.roblox.com/v1/users/{friendUserId}/accept-friend-request";
-            var content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
-
+            string url = $"{AppConfig.RobloxApiBaseUrl_Friends}/v1/users/{friendUserId}/accept-friend-request";
+            var content = new StringContent("{}", Encoding.UTF8, "application/json");
             bool success = await _robloxHttpClient.SendRequestAsync(
-                HttpMethod.Post, url, account, content, $"Accept Friend Request from {friendUsername}"
-                );
+                HttpMethod.Post, url, account, content, $"Accept Friend Request from {friendUsername}");
             return success;
         }
 
         public async Task<int> GetFriendCountAsync(Account account)
         {
-            string url = $"https://friends.roblox.com/v1/users/{account.UserId}/friends/count";
-
+            string url = $"{AppConfig.RobloxApiBaseUrl_Friends}/v1/users/{account.UserId}/friends/count";
             var (success, content) = await _robloxHttpClient.SendRequestAndReadAsync(
                 HttpMethod.Get, url, account, null, "Get Friend Count", allowRetryOnXcsrf: false
                 );
 
-            if (success)
+            if (success && !string.IsNullOrEmpty(content))
             {
                 try
                 {
                     var json = JObject.Parse(content);
-                    int count = json["count"]?.Value<int>() ?? -1;
-                    if (count != -1) { return count; }
-                    else { Console.WriteLine($"[-] Could not parse friend count from response for {account.Username}: {TruncateForLog(content)}"); }
+                    if (json.TryGetValue("count", StringComparison.OrdinalIgnoreCase, out JToken? countToken) && countToken.Type == JTokenType.Integer)
+                    {
+                        return countToken.Value<int>();
+                    }
+                    else { Console.WriteLine($"[-] Could not parse friend count (missing/invalid 'count' property) from response for {account.Username}: {TruncateForLog(content)}"); }
                 }
                 catch (JsonReaderException jex) { Console.WriteLine($"[-] Error parsing friend count JSON for {account.Username}: {jex.Message}"); }
-                catch (Exception ex) { Console.WriteLine($"[-] Error processing friend count for {account.Username}: {ex.Message}"); }
+                catch (Exception ex) { Console.WriteLine($"[-] Error processing friend count response for {account.Username}: {ex.Message}"); }
             }
-            await Task.Delay(AppConfig.CurrentApiDelayMs / 2);
             return -1;
+        }
+
+        public async Task<List<long>> GetPendingFriendRequestSendersAsync(Account account, int limit = 100)
+        {
+            var senderIds = new List<long>();
+            limit = Math.Clamp(limit, 1, 100);
+            string url = $"{AppConfig.RobloxApiBaseUrl_Friends}/v1/my/friend-requests?limit={limit}&sortOrder=Desc";
+
+            var (success, content) = await _robloxHttpClient.SendRequestAndReadAsync(
+                HttpMethod.Get,
+                url,
+                account,
+                null,
+                $"Get Pending Friend Requests for {account.Username}",
+                allowRetryOnXcsrf: true
+            );
+
+            if (success && !string.IsNullOrEmpty(content))
+            {
+                try
+                {
+                    var json = JObject.Parse(content);
+                    if (json["data"] is JArray dataArray)
+                    {
+                        foreach (var req in dataArray)
+                        {
+                            long senderId = req?["requester"]?["id"]?.Value<long>() ?? 0;
+                            if (senderId <= 0)
+                            {
+                                senderId = req?["id"]?.Value<long>() ?? 0;
+                            }
+                            if (senderId <= 0)
+                            {
+                                senderId = req?["senderId"]?.Value<long>() ?? 0;
+                            }
+
+                            if (senderId > 0)
+                            {
+                                senderIds.Add(senderId);
+                            }
+                            else
+                            {
+                                string reqString = req?.ToString(Formatting.None) ?? "[null request object]";
+                                Console.WriteLine($"[!] Warning: Could not extract sender ID from pending request object for {account.Username}: {reqString}");
+                            }
+                        }
+                        return senderIds;
+                    }
+                    else { Console.WriteLine($"[-] Could not parse pending requests (missing 'data' array) for {account.Username}."); }
+                }
+                catch (JsonReaderException jex) { Console.WriteLine($"[-] Error parsing pending requests JSON for {account.Username}: {jex.Message}"); }
+                catch (Exception ex) { Console.WriteLine($"[-] Error processing pending requests for {account.Username}: {ex.Message}"); }
+            }
+            return senderIds;
         }
     }
 }
