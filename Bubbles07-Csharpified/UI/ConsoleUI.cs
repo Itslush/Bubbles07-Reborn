@@ -31,11 +31,19 @@ namespace UI
 
         public static void PrintMenuFooter(string prompt = "Choose option") => Console.Write($"{T_BottomLeft}{T_Horz}{T_Horz}[?] {prompt}: ");
 
-        public static string Truncate(string? value, int maxLength = 30)
+        public static string Truncate(string? value, int maxLength = 150)
         {
             if (string.IsNullOrEmpty(value)) return string.Empty;
             maxLength = Math.Max(0, maxLength);
-            return value.Length <= maxLength ? value : value.Substring(0, maxLength) + "...";
+
+            if (value.Length <= maxLength)
+            {
+                return value;
+            }
+            else
+            {
+                return value[..maxLength] + "...";
+            }
         }
 
         public static void WriteLineInsideBox(string message) => Console.WriteLine($"{T_Vertical}   {message}");

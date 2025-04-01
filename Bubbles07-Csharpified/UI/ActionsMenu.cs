@@ -1,9 +1,9 @@
-﻿using System;
-using System.Linq;
-using System.Threading.Tasks;
-using _Csharpified;
+﻿using _Csharpified;
 using Actions;
 using Core;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace UI
 {
@@ -148,17 +148,32 @@ namespace UI
             Console.Clear();
         }
 
-        private static int GetIntInput(string prompt, int defaultValue)
+        private static int GetIntInput(string prompt, int defaultValue, int? minValue = null, int? maxValue = null)
         {
             Console.Write(prompt + " ");
             string? input = Console.ReadLine();
-            if (!string.IsNullOrWhiteSpace(input) && int.TryParse(input, out int parsedValue) && parsedValue >= 0)
+            bool parsed = int.TryParse(input, out int parsedValue);
+
+            if (!string.IsNullOrWhiteSpace(input))
             {
-                return parsedValue;
-            }
-            else if (!string.IsNullOrWhiteSpace(input))
-            {
-                Console.WriteLine($"[!] Invalid input. Using default value ({defaultValue}).");
+                if (parsed)
+                {
+                    if (minValue.HasValue && parsedValue < minValue.Value)
+                    {
+                        ConsoleUI.WriteErrorLine($"Input ({parsedValue}) is below minimum allowed ({minValue.Value}). Using default ({defaultValue}).");
+                        return defaultValue;
+                    }
+                    if (maxValue.HasValue && parsedValue > maxValue.Value)
+                    {
+                        ConsoleUI.WriteErrorLine($"Input ({parsedValue}) is above maximum allowed ({maxValue.Value}). Using default ({defaultValue}).");
+                        return defaultValue;
+                    }
+                    return parsedValue;
+                }
+                else
+                {
+                    ConsoleUI.WriteErrorLine($"Invalid integer input. Using default value ({defaultValue}).");
+                }
             }
             return defaultValue;
         }
@@ -166,55 +181,61 @@ namespace UI
         public static void AdjustRateLimitsUI()
         {
             Console.Clear();
-            ConsoleUI.PrintMenuTitle("Adjust Rate Limits & Timeout");
+            ConsoleUI.PrintMenuTitle("Adjust Rate Limits, Timeout & Retries");
             ConsoleUI.WriteLineInsideBox("Setting delays too low increases risk of rate limiting or account flags.");
-            ConsoleUI.WriteLineInsideBox($"Minimum allowed delay is {AppConfig.MinAllowedDelayMs}ms.");
+            ConsoleUI.WriteLineInsideBox($"Min API/Friend Delay: {AppConfig.MinAllowedDelayMs}ms | Min Retry Delay: {AppConfig.MinRetryDelayMs}ms");
             ConsoleUI.WriteLineInsideBox($"Changes apply until the application is restarted.");
             ConsoleUI.WriteLineInsideBox("");
 
-            ConsoleUI.WriteLineInsideBox($"1. General API Delay (Non-critical actions):");
-            ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentApiDelayMs}ms / Default: {AppConfig.DefaultApiDelayMs}ms / Safe Min: {AppConfig.SafeApiDelayMs}ms");
-            int newApiDelay = GetIntInput($"[?] Enter new delay in ms (or leave blank/0 for current):", AppConfig.CurrentApiDelayMs);
+            ConsoleUI.WriteLineInsideBox($"1. General API Delay (Between accounts/steps):");
+            ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentApiDelayMs}ms / Default: {AppConfig.DefaultApiDelayMs}ms");
+            int newApiDelay = GetIntInput($"[?] New delay (ms) or blank: ", AppConfig.CurrentApiDelayMs, AppConfig.MinAllowedDelayMs);
             if (newApiDelay != AppConfig.CurrentApiDelayMs)
             {
-                if (newApiDelay >= AppConfig.MinAllowedDelayMs)
-                {
-                    AppConfig.CurrentApiDelayMs = newApiDelay;
-                    ConsoleUI.WriteSuccessLine($"General API Delay set to {AppConfig.CurrentApiDelayMs}ms.");
-                    if (newApiDelay < AppConfig.SafeApiDelayMs) { ConsoleUI.WriteWarningLine($"Warning: Below suggested safe minimum ({AppConfig.SafeApiDelayMs}ms)."); }
-                }
-                else { ConsoleUI.WriteErrorLine($"Input ({newApiDelay}ms) is below minimum allowed ({AppConfig.MinAllowedDelayMs}ms). Value not changed."); }
+                AppConfig.CurrentApiDelayMs = newApiDelay;
+                ConsoleUI.WriteSuccessLine($"General API Delay set to {AppConfig.CurrentApiDelayMs}ms.");
             }
             else { ConsoleUI.WriteInfoLine($"General API Delay remains {AppConfig.CurrentApiDelayMs}ms."); }
 
-            ConsoleUI.WriteLineInsideBox($"\n2. Friend Action Delay (Friend Send/Accept - Sensitive):");
-            ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentFriendActionDelayMs}ms / Default: {AppConfig.DefaultFriendActionDelayMs}ms / Safe Min: {AppConfig.SafeFriendActionDelayMs}ms");
-            int newFriendDelay = GetIntInput($"[?] Enter new delay in ms (or leave blank/0 for current):", AppConfig.CurrentFriendActionDelayMs);
+            ConsoleUI.WriteLineInsideBox($"\n2. Friend Action Delay (Send/Accept):");
+            ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentFriendActionDelayMs}ms / Default: {AppConfig.DefaultFriendActionDelayMs}ms");
+            int newFriendDelay = GetIntInput($"[?] New delay (ms) or blank: ", AppConfig.CurrentFriendActionDelayMs, AppConfig.MinAllowedDelayMs);
             if (newFriendDelay != AppConfig.CurrentFriendActionDelayMs)
             {
-                if (newFriendDelay >= AppConfig.MinAllowedDelayMs)
-                {
-                    AppConfig.CurrentFriendActionDelayMs = newFriendDelay;
-                    ConsoleUI.WriteSuccessLine($"Friend Action Delay set to {AppConfig.CurrentFriendActionDelayMs}ms.");
-                    if (newFriendDelay < AppConfig.SafeFriendActionDelayMs) { ConsoleUI.WriteWarningLine($"Warning: Below suggested safe minimum ({AppConfig.SafeFriendActionDelayMs}ms)."); }
-                }
-                else { ConsoleUI.WriteErrorLine($"Input ({newFriendDelay}ms) is below minimum allowed ({AppConfig.MinAllowedDelayMs}ms). Value not changed."); }
+                AppConfig.CurrentFriendActionDelayMs = newFriendDelay;
+                ConsoleUI.WriteSuccessLine($"Friend Action Delay set to {AppConfig.CurrentFriendActionDelayMs}ms.");
             }
             else { ConsoleUI.WriteInfoLine($"Friend Action Delay remains {AppConfig.CurrentFriendActionDelayMs}ms."); }
 
             ConsoleUI.WriteLineInsideBox($"\n3. Request Timeout (Max wait for API response):");
             ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.DefaultRequestTimeoutSec}s / Default: {AppConfig.DefaultRequestTimeoutSec}s");
-            int newTimeoutSec = GetIntInput($"[?] Enter new timeout in seconds (e.g., 15, 30) (or leave blank/0 for current):", AppConfig.DefaultRequestTimeoutSec);
+            int newTimeoutSec = GetIntInput($"[?] New timeout (seconds, 5-120) or blank: ", AppConfig.DefaultRequestTimeoutSec, 5, 120);
             if (newTimeoutSec != AppConfig.DefaultRequestTimeoutSec)
             {
-                if (newTimeoutSec >= 5 && newTimeoutSec <= 120)
-                {
-                    AppConfig.DefaultRequestTimeoutSec = newTimeoutSec;
-                    ConsoleUI.WriteSuccessLine($"Request Timeout set to {AppConfig.DefaultRequestTimeoutSec}s.");
-                }
-                else { ConsoleUI.WriteErrorLine($"Input ({newTimeoutSec}s) is outside reasonable bounds (5-120s). Value not changed."); }
+                AppConfig.DefaultRequestTimeoutSec = newTimeoutSec;
+                ConsoleUI.WriteSuccessLine($"Request Timeout set to {AppConfig.DefaultRequestTimeoutSec}s.");
             }
             else { ConsoleUI.WriteInfoLine($"Request Timeout remains {AppConfig.DefaultRequestTimeoutSec}s."); }
+
+            ConsoleUI.WriteLineInsideBox($"\n4. Max Action Retries (Attempts after initial failure):");
+            ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentMaxApiRetries} / Default: {AppConfig.DefaultMaxApiRetries}");
+            int newMaxRetries = GetIntInput($"[?] New max retries (0+) or blank: ", AppConfig.CurrentMaxApiRetries, 0);
+            if (newMaxRetries != AppConfig.CurrentMaxApiRetries)
+            {
+                AppConfig.CurrentMaxApiRetries = newMaxRetries;
+                ConsoleUI.WriteSuccessLine($"Max Action Retries set to {AppConfig.CurrentMaxApiRetries}.");
+            }
+            else { ConsoleUI.WriteInfoLine($"Max Action Retries remains {AppConfig.CurrentMaxApiRetries}."); }
+
+            ConsoleUI.WriteLineInsideBox($"\n5. Action Retry Delay (Wait between retries):");
+            ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentApiRetryDelayMs}ms / Default: {AppConfig.DefaultApiRetryDelayMs}ms");
+            int newRetryDelay = GetIntInput($"[?] New retry delay (ms) or blank: ", AppConfig.CurrentApiRetryDelayMs, AppConfig.MinRetryDelayMs);
+            if (newRetryDelay != AppConfig.CurrentApiRetryDelayMs)
+            {
+                AppConfig.CurrentApiRetryDelayMs = newRetryDelay;
+                ConsoleUI.WriteSuccessLine($"Action Retry Delay set to {AppConfig.CurrentApiRetryDelayMs}ms.");
+            }
+            else { ConsoleUI.WriteInfoLine($"Action Retry Delay remains {AppConfig.CurrentApiRetryDelayMs}ms."); }
 
             Console.WriteLine("\n" + ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
         }

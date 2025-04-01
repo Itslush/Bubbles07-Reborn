@@ -1,15 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using System.Text;
 using Models;
 using Roblox.Http;
 using _Csharpified;
+using System;
+using System.Net.Http;
+using System.Threading.Tasks;
+using System.Linq;
+using System.Collections.Generic;
+using System.Threading;
+using UI;
 
 namespace Roblox.Services
 {
@@ -22,42 +23,48 @@ namespace Roblox.Services
             _robloxHttpClient = robloxHttpClient ?? throw new ArgumentNullException(nameof(robloxHttpClient));
         }
 
-        private static string TruncateForLog(string? value, int maxLength = 100)
-        {
-            if (string.IsNullOrEmpty(value)) return string.Empty;
-            return value.Length <= maxLength ? value.Substring(0, maxLength) + "..." : value;
-        }
-
         public async Task<AvatarDetails?> FetchAvatarDetailsAsync(long userId)
         {
+            if (userId <= 0)
+            {
+                Console.WriteLine("[-] Cannot fetch avatar details: Invalid User ID provided.");
+                return null;
+            }
+
             string avatarUrl = $"{AppConfig.RobloxApiBaseUrl_Avatar}/v1/users/{userId}/avatar";
             JObject? avatarData = null;
+            HttpResponseMessage? response = null;
+
             try
             {
                 var externalClient = _robloxHttpClient.GetExternalHttpClient();
 
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(AppConfig.DefaultRequestTimeoutSec));
-                HttpResponseMessage response = await externalClient.GetAsync(avatarUrl, cts.Token);
+                response = await externalClient.GetAsync(avatarUrl, cts.Token);
+
+                string jsonString = await response.Content.ReadAsStringAsync();
 
                 if (response.IsSuccessStatusCode)
                 {
-                    string jsonString = await response.Content.ReadAsStringAsync();
                     avatarData = JObject.Parse(jsonString);
                 }
                 else
                 {
-                    string errorContent = await response.Content.ReadAsStringAsync();
                     if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
                     {
                         Console.WriteLine($"[-] Failed to fetch avatar details for {userId}: 404 Not Found (User may not exist?).");
                     }
                     else if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
                     {
-                        Console.WriteLine($"[-] Failed to fetch avatar details for {userId}: 400 Bad Request. Details: {TruncateForLog(errorContent)}");
+                        Console.WriteLine($"[-] Failed to fetch avatar details for {userId}: 400 Bad Request. Details: {ConsoleUI.Truncate(jsonString)}");
+                    }
+                    else if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                    {
+                        Console.WriteLine($"[-] Failed to fetch avatar details for {userId}: 429 Too Many Requests. Check delays.");
                     }
                     else
                     {
-                        Console.WriteLine($"[-] Failed to fetch avatar details for {userId}: {response.StatusCode}. Details: {TruncateForLog(errorContent)}");
+                        Console.WriteLine($"[-] Failed to fetch avatar details for {userId}: {(int)response.StatusCode} {response.ReasonPhrase}. Details: {ConsoleUI.Truncate(jsonString)}");
                     }
                     return null;
                 }
@@ -66,6 +73,8 @@ namespace Roblox.Services
             catch (JsonReaderException jex) { Console.WriteLine($"[!] Error parsing avatar details JSON for {userId}: {jex.Message}."); return null; }
             catch (HttpRequestException hrex) { Console.WriteLine($"[!] Network error fetching avatar details for {userId}: {hrex.Message}"); return null; }
             catch (Exception ex) { Console.WriteLine($"[!] Exception fetching avatar details for {userId}: {ex.GetType().Name} - {ex.Message}"); return null; }
+            finally { response?.Dispose(); }
+
 
             if (avatarData == null) return null;
 
@@ -74,10 +83,12 @@ namespace Roblox.Services
                 var details = new AvatarDetails
                 {
                     AssetIds = avatarData["assets"]?
-                                .Select(a => a["id"]?.Value<long>() ?? 0)
+                                .Select(a => a?["id"]?.Value<long>() ?? 0)
                                 .Where(id => id != 0)
                                 .OrderBy(id => id)
+                                .Distinct()
                                 .ToList() ?? new List<long>(),
+
                     BodyColors = avatarData["bodyColors"] as JObject,
                     PlayerAvatarType = avatarData["playerAvatarType"]?.ToString(),
                     Scales = avatarData["scales"] as JObject,
@@ -86,7 +97,7 @@ namespace Roblox.Services
 
                 if (details.BodyColors == null || details.PlayerAvatarType == null || details.Scales == null || details.AssetIds == null)
                 {
-                    Console.WriteLine($"[!] Warning: Fetched avatar data for {userId} missing required fields (bodyColors, playerAvatarType, scales, assets).");
+                    Console.WriteLine($"[!] Warning: Fetched avatar data for {userId} was incomplete (missing fields: bodyColors, playerAvatarType, scales, or assets). Content: {ConsoleUI.Truncate(avatarData.ToString())}");
                     return null;
                 }
 
@@ -94,18 +105,21 @@ namespace Roblox.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[!] Error creating AvatarDetails object from JSON for {userId}: {ex.Message}");
+                Console.WriteLine($"[!] Error processing fetched avatar JSON data for {userId}: {ex.Message}");
                 return null;
             }
         }
 
         public async Task<bool> SetAvatarAsync(Account account, long sourceUserId)
         {
+            if (account == null) { Console.WriteLine("[-] Cannot SetAvatar: Account is null."); return false; }
             if (string.IsNullOrEmpty(account.XcsrfToken))
             {
                 Console.WriteLine($"[-] Cannot SetAvatar for {account.Username}: Missing XCSRF token.");
                 return false;
             }
+            if (sourceUserId <= 0) { Console.WriteLine("[-] Cannot SetAvatar: Invalid Source User ID."); return false; }
+
             Console.WriteLine($"[*] Action: SetAvatar Source: {sourceUserId} Target: {account.Username}");
 
             AvatarDetails? targetAvatarDetails = await FetchAvatarDetailsAsync(sourceUserId);
@@ -118,7 +132,7 @@ namespace Roblox.Services
 
             if (targetAvatarDetails.AssetIds == null || targetAvatarDetails.BodyColors == null || targetAvatarDetails.PlayerAvatarType == null || targetAvatarDetails.Scales == null)
             {
-                Console.WriteLine($"[-] Source avatar data from {sourceUserId} is incomplete. Cannot apply.");
+                Console.WriteLine($"[-] Source avatar data fetched from {sourceUserId} is incomplete. Cannot apply.");
                 return false;
             }
 
@@ -132,30 +146,41 @@ namespace Roblox.Services
 
             async Task<bool> ExecuteAvatarStep(Func<Task<bool>> stepAction, string description)
             {
-                bool success = false;
+                bool stepSuccess = false;
                 try
                 {
-                    success = await stepAction();
-                    if (!success) Console.WriteLine($"   [-] Step Failed: {description} for {account.Username}.");
+                    stepSuccess = await stepAction();
+                    if (!stepSuccess)
+                    {
+                        Console.WriteLine($"   [-] Step Failed: {description} for {account.Username}.");
+                        overallSuccess = false;
+                    }
+                    else
+                    {
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"   [-] ERROR applying {description} for {account.Username}: {ex.GetType().Name}");
-                    success = false;
+                    Console.WriteLine($"   [-] UNEXPECTED ERROR applying {description} for {account.Username}: {ex.GetType().Name} - {ex.Message}");
+                    stepSuccess = false;
+                    overallSuccess = false;
                 }
 
-                overallSuccess &= success;
-
-                if (success)
+                if (stepSuccess)
                 {
                     await Task.Delay(AppConfig.CurrentApiDelayMs / 2);
                 }
-                return success;
+                else
+                {
+                }
+
+                return stepSuccess;
             }
 
             if (!await ExecuteAvatarStep(async () =>
             {
                 string url = $"{AppConfig.RobloxApiBaseUrl_Avatar}/v1/avatar/set-body-colors";
+                if (bodyColorsPayload == null) return false;
                 var content = new StringContent(bodyColorsPayload.ToString(Formatting.None), Encoding.UTF8, "application/json");
                 return await _robloxHttpClient.SendRequestAsync(HttpMethod.Post, url, account, content, "Set Body Colors");
             }, "Body Colors")) return false;
@@ -170,6 +195,7 @@ namespace Roblox.Services
             if (!await ExecuteAvatarStep(async () =>
             {
                 string url = $"{AppConfig.RobloxApiBaseUrl_Avatar}/v1/avatar/set-scales";
+                if (scalesPayload == null) return false;
                 var content = new StringContent(scalesPayload.ToString(Formatting.None), Encoding.UTF8, "application/json");
                 return await _robloxHttpClient.SendRequestAsync(HttpMethod.Post, url, account, content, "Set Scales");
             }, "Scales")) return false;
@@ -188,8 +214,7 @@ namespace Roblox.Services
                 return await _robloxHttpClient.SendRequestAsync(HttpMethod.Post, url, account, content, "Redraw Thumbnail (Final Step)");
             }, "Redraw Thumbnail"))
             {
-                Console.WriteLine($"[*] Warning: Avatar set, but final thumbnail redraw failed for {account.Username}.");
-                overallSuccess = true;
+                Console.WriteLine($"[*] Warning: Avatar settings applied, but final thumbnail redraw failed for {account.Username}.");
             }
 
             return overallSuccess;
@@ -202,38 +227,24 @@ namespace Roblox.Services
 
             if (!string.Equals(details1.PlayerAvatarType, details2.PlayerAvatarType, StringComparison.OrdinalIgnoreCase))
             {
-                Console.WriteLine($"Debug: Avatar type mismatch ('{details1.PlayerAvatarType}' vs '{details2.PlayerAvatarType}')");
                 return false;
             }
 
             if (details1.BodyColors == null || details2.BodyColors == null) return false;
             if (!JToken.DeepEquals(details1.BodyColors, details2.BodyColors))
             {
-                Console.WriteLine("Debug: Body colors mismatch.");
-                Console.WriteLine($"   D1: {details1.BodyColors.ToString(Formatting.None)}");
-                Console.WriteLine($"   D2: {details2.BodyColors.ToString(Formatting.None)}");
                 return false;
             }
 
             if (details1.Scales == null || details2.Scales == null) return false;
             if (!JToken.DeepEquals(details1.Scales, details2.Scales))
             {
-                Console.WriteLine("Debug: Scales mismatch.");
-                Console.WriteLine($"   D1: {details1.Scales.ToString(Formatting.None)}");
-                Console.WriteLine($"   D2: {details2.Scales.ToString(Formatting.None)}");
                 return false;
             }
 
-            var assets1 = details1.AssetIds;
-            var assets2 = details2.AssetIds;
-
-            if (assets1 == null || assets2 == null) return false;
-
-            if (!assets1.SequenceEqual(assets2))
+            if (details1.AssetIds == null || details2.AssetIds == null) return false;
+            if (!details1.AssetIds.SequenceEqual(details2.AssetIds))
             {
-                Console.WriteLine($"Debug: Asset IDs mismatch (Count {assets1.Count} vs {assets2.Count}).");
-                Console.WriteLine($"   D1: [{string.Join(",", assets1)}]");
-                Console.WriteLine($"   D2: [{string.Join(",", assets2)}]");
                 return false;
             }
 

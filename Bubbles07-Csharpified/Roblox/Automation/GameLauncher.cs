@@ -1,14 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Diagnostics;
 using System.Web;
+using System.Text;
 using Models;
 using _Csharpified;
 using Roblox.Services;
+using System;
+using System.Threading.Tasks;
+using System.ComponentModel;
+using System.Linq;
+using System.Collections.Generic;
+using UI;
 
 namespace Roblox.Automation
 {
@@ -23,12 +24,6 @@ namespace Roblox.Automation
             _badgeService = badgeService ?? throw new ArgumentNullException(nameof(badgeService));
         }
 
-        private static string TruncateForLog(string? value, int maxLength = 100)
-        {
-            if (string.IsNullOrEmpty(value)) return string.Empty;
-            return value.Length <= maxLength ? value.Substring(0, maxLength) + "..." : value;
-        }
-
         public async Task LaunchGameForBadgesAsync(Account account, string gameId, int badgeGoal = AppConfig.DefaultBadgeGoal)
         {
             if (string.IsNullOrWhiteSpace(account.Cookie))
@@ -36,7 +31,6 @@ namespace Roblox.Automation
                 Console.WriteLine($"[-] Cannot GetBadges for {account.Username}: Missing Cookie.");
                 return;
             }
-
             Console.WriteLine($"[*] Refreshing XCSRF for {account.Username} before getting auth ticket...");
             bool tokenRefreshed = await _authService.RefreshXCSRFTokenIfNeededAsync(account);
             if (!tokenRefreshed || string.IsNullOrEmpty(account.XcsrfToken))
@@ -63,7 +57,6 @@ namespace Roblox.Automation
 
             long browserTrackerId = Random.Shared.NextInt64(10_000_000_000L, 100_000_000_000L);
             long launchTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
             string placeLauncherUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame&browserTrackerId={browserTrackerId}&placeId={gameId}&isPlayTogetherGame=false&joinAttemptId={Guid.NewGuid()}&joinAttemptOrigin=PlayButton";
             string encodedPlaceLauncherUrl = HttpUtility.UrlEncode(placeLauncherUrl);
 
@@ -80,7 +73,7 @@ namespace Roblox.Automation
             try
             {
                 Console.WriteLine($"[*] Dispatching launch command for Roblox Player...");
-                Console.WriteLine($"   URL: {TruncateForLog(launchUrl, 150)}");
+                Console.WriteLine($"   URL: {ConsoleUI.Truncate(launchUrl, 150)}");
                 Process.Start(new ProcessStartInfo(launchUrl) { UseShellExecute = true });
                 Console.WriteLine($"[+] Launch command sent. The Roblox Player should start shortly.");
                 Console.WriteLine($"[!] Please complete any actions required in the game to earn badges (aiming for {badgeGoal}).");
@@ -134,6 +127,7 @@ namespace Roblox.Automation
                     try { return !p.HasExited; }
                     catch { return false; }
                 }).ToList();
+
 
                 if (robloxProcesses.Count == 0) { Console.WriteLine($"[-] No active Roblox Player processes found to terminate."); }
                 else

@@ -1,10 +1,11 @@
-﻿using System;
+﻿using _Csharpified;
+using Core;
+using Models;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using _Csharpified;
-using Core;
-using Models;
+using UI;
 
 namespace UI
 {
@@ -43,7 +44,7 @@ namespace UI
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"5. Show Selected Accounts"));
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"6. Show Accounts with Full Cookies"));
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"7. Actions Menu (Execute Tasks on Selected)"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"8. Adjust Rate Limits & Timeout"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"8. Adjust Rate Limits, Timeout & Retries"));
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_End, $"0. Exit"));
 
                 ConsoleUI.PrintMenuFooter();
@@ -89,7 +90,7 @@ namespace UI
                     default: ConsoleUI.WriteErrorLine("Invalid choice. Please enter a number from the menu."); break;
                 }
 
-                if (!exit && choice != "7")
+                if (!exit && choice != "7" && choice != "8")
                 {
                     Console.WriteLine("\nPress Enter to return to the Main Menu...");
                     Console.ReadLine();
@@ -206,6 +207,7 @@ namespace UI
                 Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
             }
         }
+
 
         private void ShowAccountsWithCookiesUI()
         {

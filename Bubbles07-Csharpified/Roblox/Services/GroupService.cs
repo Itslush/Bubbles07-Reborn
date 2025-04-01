@@ -19,11 +19,14 @@ namespace Roblox.Services
 
         public async Task<bool> JoinGroupAsync(Account account, long groupId)
         {
+            if (account == null) { Console.WriteLine($"[-] Cannot JoinGroup: Account is null."); return false; }
             if (string.IsNullOrEmpty(account.XcsrfToken))
             {
                 Console.WriteLine($"[-] Cannot JoinGroup for {account.Username}: Missing XCSRF token.");
                 return false;
             }
+            if (groupId <= 0) { Console.WriteLine($"[-] Cannot JoinGroup for {account.Username}: Invalid Group ID ({groupId})."); return false; }
+
             Console.WriteLine($"[*] Action: JoinGroup Target: {account.Username} Group: {groupId}");
 
             string url = $"{AppConfig.RobloxApiBaseUrl_Groups}/v1/groups/{groupId}/users";
@@ -34,8 +37,13 @@ namespace Roblox.Services
                 url,
                 account,
                 content,
-                $"Join Group {groupId}"
+                $"Join Group {groupId}",
+                allowRetryOnXcsrf: true
                 );
+
+            if (success)
+            {
+            }
 
             return success;
         }

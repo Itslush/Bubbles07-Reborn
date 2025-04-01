@@ -1,20 +1,28 @@
-﻿using System.Diagnostics;
-using Newtonsoft.Json;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 using _Csharpified;
 using Core;
 using Models;
+using Newtonsoft.Json;
 using Roblox.Automation;
 using Roblox.Services;
-using Newtonsoft.Json.Linq;
-using System;
-using System.Net.Http;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Threading;
+using UI;
 
 namespace Actions
 {
+    internal enum AcceptAttemptResult
+    {
+        Accepted,
+        Failed,
+        Skipped_AlreadyDone,
+        Skipped_InvalidSender,
+        Skipped_InvalidReceiver
+    }
+
     public class AccountActionExecutor
     {
         private readonly AccountManager _accountManager;
@@ -51,13 +59,6 @@ namespace Actions
             _badgeService = badgeService ?? throw new ArgumentNullException(nameof(badgeService));
             _webDriverManager = webDriverManager ?? throw new ArgumentNullException(nameof(webDriverManager));
             _gameLauncher = gameLauncher ?? throw new ArgumentNullException(nameof(gameLauncher));
-        }
-
-        private static string TruncateForLog(string? value, int maxLength = 50)
-        {
-            maxLength = Math.Max(0, maxLength);
-            if (string.IsNullOrEmpty(value)) return string.Empty;
-            return value.Length <= maxLength ? value : value[..maxLength] + "...";
         }
 
         private async Task<AvatarDetails?> GetOrFetchTargetAvatarDetailsAsync(long sourceUserId)
@@ -103,69 +104,142 @@ namespace Actions
                 return;
             }
 
-            var selectedAccounts = _accountManager.GetSelectedAccounts();
-            var accountsToProcess = selectedAccounts
+            var selectedAccountsRaw = _accountManager.GetSelectedAccounts();
+            var accountsToProcess = selectedAccountsRaw
                 .Where(acc => acc != null && acc.IsValid && (!requireValidToken || !string.IsNullOrEmpty(acc.XcsrfToken)))
                 .ToList();
 
-            int totalSelected = selectedAccounts.Count;
+            int totalSelected = selectedAccountsRaw.Count;
             int validCount = accountsToProcess.Count;
             int skippedInvalidCount = totalSelected - validCount;
 
             Console.WriteLine($"\n[>>] Executing Action: {actionName} for {validCount} valid account(s)...");
             if (skippedInvalidCount > 0)
             {
-                string reason = requireValidToken ? "invalid/lacked XCSRF" : "invalid";
+                string reason = requireValidToken ? "invalid / lacked XCSRF" : "marked invalid";
                 Console.WriteLine($"   ({skippedInvalidCount} selected accounts were {reason} and will be skipped)");
             }
-            if (validCount == 0)
+            if (validCount == 0 && totalSelected > 0)
             {
-                Console.WriteLine($"[!] No valid accounts selected for this action.");
+                Console.WriteLine($"[!] All selected accounts were skipped due to being invalid or lacking required tokens.");
+                return;
+            }
+            else if (validCount == 0 && totalSelected == 0)
+            {
+                Console.WriteLine($"[!] No accounts selected for this action.");
                 return;
             }
 
             int successCount = 0, failCount = 0, skippedPreCheckCount = 0;
             var stopwatch = Stopwatch.StartNew();
+            int maxRetries = AppConfig.CurrentMaxApiRetries;
+            int retryDelayMs = AppConfig.CurrentApiRetryDelayMs;
+            int baseDelayMs = AppConfig.CurrentApiDelayMs;
 
             for (int i = 0; i < accountsToProcess.Count; i++)
             {
                 Account acc = accountsToProcess[i];
                 Console.WriteLine($"\n[{i + 1}/{validCount}] Processing: {acc.Username} (ID: {acc.UserId}) for '{actionName}'");
-                try
-                {
-                    var (success, skipped) = await action(acc);
 
-                    if (skipped)
+                bool finalSuccess = false;
+                bool finalSkipped = false;
+                Exception? lastException = null;
+
+                for (int attempt = 0; attempt <= maxRetries; attempt++)
+                {
+                    try
                     {
-                        skippedPreCheckCount++;
+                        if (attempt > 0)
+                        {
+                            Console.WriteLine($"   [~] Retrying action '{actionName}' for {acc.Username} (Attempt {attempt}/{maxRetries})...");
+                        }
+
+                        var (currentSuccess, currentSkipped) = await action(acc);
+                        finalSuccess = currentSuccess;
+                        finalSkipped = currentSkipped;
+                        lastException = null;
+
+                        if (finalSuccess || finalSkipped)
+                        {
+                            break;
+                        }
+                        else if (attempt < maxRetries)
+                        {
+                            Console.WriteLine($"   [-] Action '{actionName}' failed for {acc.Username}. Waiting {retryDelayMs}ms before retry...");
+                            await Task.Delay(retryDelayMs);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"   [-] Action '{actionName}' failed for {acc.Username} after {maxRetries + 1} attempts (including initial).");
+                        }
                     }
-                    else if (success)
+                    catch (Exception ex)
                     {
-                        successCount++;
-                    }
-                    else
-                    {
-                        failCount++;
-                        Console.WriteLine($"   [-] Action '{actionName}' reported failure for {acc.Username}.");
+                        lastException = ex;
+                        finalSuccess = false;
+                        finalSkipped = false;
+
+                        string errorType = ex switch
+                        {
+                            InvalidOperationException _ => "Config/State Error",
+                            HttpRequestException hrex => $"Network Error ({(int?)hrex.StatusCode})",
+                            JsonException _ => "JSON Error",
+                            TaskCanceledException _ => "Timeout/Cancelled",
+                            NullReferenceException _ => "Null Reference Error",
+                            _ => $"Runtime Error ({ex.GetType().Name})"
+                        };
+                        Console.WriteLine($"   [!] {errorType} during '{actionName}' for {acc.Username}: {ConsoleUI.Truncate(ex.Message)}");
+
+                        if (attempt < maxRetries)
+                        {
+                            if (!acc.IsValid)
+                            {
+                                Console.WriteLine($"   [!] Account {acc.Username} marked invalid after error. Stopping retries for this action.");
+                                break;
+                            }
+                            Console.WriteLine($"   [!] Exception caught during '{actionName}'. Waiting {retryDelayMs}ms before retry (Attempt {attempt + 1}/{maxRetries})...");
+                            await Task.Delay(retryDelayMs);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"   [!] Exception caught on final attempt ({maxRetries + 1}) for '{actionName}'. Action failed.");
+                            if (!acc.IsValid) { Console.WriteLine($"   [!] Account {acc.Username} was marked invalid during the process."); }
+                        }
                     }
                 }
-                catch (InvalidOperationException ioex) { Console.WriteLine($"[!] Config/State Error for {acc.Username} during '{actionName}': {ioex.Message}"); failCount++; }
-                catch (HttpRequestException hrex) { Console.WriteLine($"[!] Network Error during '{actionName}' for {acc.Username}: {hrex.StatusCode} - {hrex.Message}"); failCount++; }
-                catch (JsonException jex) { Console.WriteLine($"[!] JSON Error during '{actionName}' for {acc.Username}: {jex.Message}"); failCount++; }
-                catch (Exception ex) { Console.WriteLine($"[!] Runtime Error during '{actionName}' for {acc.Username}: {ex.GetType().Name} - {ex.Message}"); failCount++; }
-                finally
+
+                if (finalSkipped)
                 {
-                    if (i < accountsToProcess.Count - 1)
+                    skippedPreCheckCount++;
+                }
+                else if (finalSuccess)
+                {
+                    successCount++;
+                }
+                else
+                {
+                    failCount++;
+                    if (lastException != null)
                     {
-                        await Task.Delay(AppConfig.CurrentApiDelayMs / 2);
+                        Console.WriteLine($"   [-] Final failure for {acc.Username} likely due to {lastException.GetType().Name}.");
                     }
+                }
+
+                if (i < accountsToProcess.Count - 1)
+                {
+                    await Task.Delay(baseDelayMs / 2);
                 }
             }
+
             stopwatch.Stop();
 
             Console.WriteLine($"\n[<<] Action '{actionName}' Finished.");
-            Console.WriteLine($"   Success (Action Performed): {successCount}, Failed: {failCount}");
-            Console.WriteLine($"   Skipped (Pre-Check Met): {skippedPreCheckCount}, Skipped (Invalid Account): {skippedInvalidCount}");
+            Console.WriteLine($"   Success (Action Performed): {successCount}");
+            if (skippedPreCheckCount > 0) Console.WriteLine($"   Skipped (Pre-Check Met): {skippedPreCheckCount}");
+            Console.WriteLine($"   Failed (After Retries/Errors): {failCount}");
+            if (skippedInvalidCount > 0) Console.WriteLine($"   Skipped (Invalid/Token): {skippedInvalidCount}");
+            Console.WriteLine($"   --------------------------------");
+            Console.WriteLine($"   Total Processed/Attempted: {validCount}");
             Console.WriteLine($"   Total Time: {stopwatch.ElapsedMilliseconds}ms ({stopwatch.Elapsed.TotalSeconds:F1}s)");
         }
 
@@ -174,14 +248,14 @@ namespace Actions
            {
                string targetName = AppConfig.DefaultDisplayName;
                Console.WriteLine($"   Checking current display name for {acc.Username}...");
+
                string? currentName = await _userService.GetCurrentDisplayNameAsync(acc);
 
                if (currentName == null)
                {
                    Console.WriteLine($"   [-] Failed to fetch current display name. Proceeding with set attempt...");
                    bool setResult = await _userService.SetDisplayNameAsync(acc, targetName);
-                   if (setResult) Console.WriteLine($"      [+] Display name set successfully.");
-                   else Console.WriteLine($"      [-] Display name set failed.");
+                   Console.WriteLine(setResult ? "      [+] Display name set successfully (blind attempt)." : "      [-] Display name set failed (blind attempt).");
                    return (setResult, false);
                }
                else if (string.Equals(currentName, targetName, StringComparison.OrdinalIgnoreCase))
@@ -193,8 +267,7 @@ namespace Actions
                {
                    Console.WriteLine($"   Current name is '{currentName}'. Attempting update to '{targetName}'...");
                    bool setResult = await _userService.SetDisplayNameAsync(acc, targetName);
-                   if (setResult) Console.WriteLine($"      [+] Display name set successfully.");
-                   else Console.WriteLine($"      [-] Display name set failed.");
+                   Console.WriteLine(setResult ? "      [+] Display name set successfully." : "      [-] Display name set failed.");
                    return (setResult, false);
                }
            }, "SetDisplayName");
@@ -203,12 +276,17 @@ namespace Actions
             PerformActionOnSelectedAsync(async acc =>
             {
                 long targetUserId = AppConfig.DefaultTargetUserIdForAvatarCopy;
+                if (targetUserId <= 0)
+                {
+                    Console.WriteLine($"   [!] Skipping SetAvatar: No valid DefaultTargetUserIdForAvatarCopy ({targetUserId}) configured.");
+                    return (false, true);
+                }
                 Console.WriteLine($"   Checking current avatar for {acc.Username} against target {targetUserId}...");
 
                 AvatarDetails? targetAvatarDetails = await GetOrFetchTargetAvatarDetailsAsync(targetUserId);
                 if (targetAvatarDetails == null)
                 {
-                    Console.WriteLine($"   [-] Critical Error: Could not get target avatar details for {targetUserId}. Cannot perform pre-check or set avatar.");
+                    Console.WriteLine($"   [-] Critical Error: Could not get target avatar details for {targetUserId}. Cannot perform check or set avatar.");
                     return (false, false);
                 }
 
@@ -219,8 +297,7 @@ namespace Actions
                 {
                     Console.WriteLine($"   [-] Failed to fetch current avatar details for {acc.Username}. Proceeding with set attempt...");
                     bool setResult = await _avatarService.SetAvatarAsync(acc, targetUserId);
-                    if (setResult) Console.WriteLine($"      [+] Avatar set successfully.");
-                    else Console.WriteLine($"      [-] Avatar set failed.");
+                    Console.WriteLine(setResult ? "      [+] Avatar set successfully (blind attempt)." : "      [-] Avatar set failed (blind attempt).");
                     return (setResult, false);
                 }
                 else
@@ -235,8 +312,7 @@ namespace Actions
                     {
                         Console.WriteLine($"   Current avatar differs from target. Attempting update...");
                         bool setResult = await _avatarService.SetAvatarAsync(acc, targetUserId);
-                        if (setResult) Console.WriteLine($"      [+] Avatar set successfully.");
-                        else Console.WriteLine($"      [-] Avatar set failed.");
+                        Console.WriteLine(setResult ? "      [+] Avatar set successfully." : "      [-] Avatar set failed.");
                         return (setResult, false);
                     }
                 }
@@ -244,9 +320,16 @@ namespace Actions
 
         public Task JoinGroupOnSelectedAsync() =>
             PerformActionOnSelectedAsync(async acc => {
-                bool success = await _groupService.JoinGroupAsync(acc, AppConfig.DefaultGroupId);
-                if (success) Console.WriteLine($"      [+] Join group request sent/processed.");
-                else Console.WriteLine($"      [-] Join group request failed.");
+                long targetGroupId = AppConfig.DefaultGroupId;
+                if (targetGroupId <= 0)
+                {
+                    Console.WriteLine($"   [!] Skipping JoinGroup: No valid DefaultGroupId ({targetGroupId}) configured.");
+                    return (false, true);
+                }
+                Console.WriteLine($"   Attempting to join group {targetGroupId} for {acc.Username}...");
+                bool success = await _groupService.JoinGroupAsync(acc, targetGroupId);
+
+                Console.WriteLine(success ? "      [+] Join group request sent/processed (Result: OK)." : "      [-] Join group request failed (Result: Error).");
                 return (success, false);
             }, "JoinGroup");
 
@@ -254,7 +337,7 @@ namespace Actions
              PerformActionOnSelectedAsync(async acc =>
              {
                  Console.WriteLine($"   Checking current badge count for {acc.Username} (Goal: >= {badgeGoal})...");
-                 int currentBadgeCount = await _badgeService.GetBadgeCountAsync(acc, 100);
+                 int currentBadgeCount = await _badgeService.GetBadgeCountAsync(acc, limit: 100);
 
                  if (currentBadgeCount == -1)
                  {
@@ -272,26 +355,31 @@ namespace Actions
 
                  Console.WriteLine($"   Attempting to launch game {AppConfig.DefaultBadgeGameId}...");
                  await _gameLauncher.LaunchGameForBadgesAsync(acc, AppConfig.DefaultBadgeGameId, badgeGoal);
-                 Console.WriteLine($"      [+] Game launch sequence initiated.");
+
+                 Console.WriteLine($"      [+] Game launch sequence initiated/completed for {acc.Username}.");
                  return (true, false);
 
              }, $"GetBadges (Goal: {badgeGoal})", requireInteraction: true);
 
         public Task OpenInBrowserOnSelectedAsync() =>
-           PerformActionOnSelectedAsync(acc =>
+           PerformActionOnSelectedAsync(async acc =>
            {
+               Console.WriteLine($"   Initiating browser session for {acc.Username}...");
                var driver = _webDriverManager.StartBrowserWithCookie(acc, AppConfig.HomePageUrl, headless: false);
+
                if (driver == null)
                {
                    Console.WriteLine($"   [-] Failed to launch browser session.");
-                   return Task.FromResult((Success: false, Skipped: false));
+                   return (false, false);
                }
                else
                {
                    Console.WriteLine($"   [+] Browser session initiated for {acc.Username}. Close the browser window manually when done.");
-                   return Task.FromResult((Success: true, Skipped: false));
+                   await Task.CompletedTask;
+                   return (true, false);
                }
            }, "OpenInBrowser", requireInteraction: true, requireValidToken: false);
+
 
         public async Task HandleLimitedFriendRequestsAsync()
         {
@@ -299,33 +387,53 @@ namespace Actions
             int friendGoal = AppConfig.DefaultFriendGoal;
 
             Console.WriteLine($"\n[*] Executing Action: Limited Friend Actions (Goal: >= {friendGoal} friends)");
+
+            if (selectedAccountsRaw.Count < 2)
+            {
+                Console.WriteLine("[!] Need at least 2 selected accounts for this action. Aborting.");
+                return;
+            }
+
             Console.WriteLine($"[*] Phase 0: Pre-checking XCSRF and Friend Counts for {selectedAccountsRaw.Count} selected accounts...");
 
             List<Account> selectedValidAccounts = new List<Account>();
             List<Account> accountsNeedingFriends = new List<Account>();
             int preCheckFailures = 0; int preCheckRefreshed = 0;
             int alreadyMetGoal = 0; int friendCheckErrors = 0;
+            Stopwatch preCheckStopwatch = Stopwatch.StartNew();
 
             for (int i = 0; i < selectedAccountsRaw.Count; i++)
             {
                 Account acc = selectedAccountsRaw[i];
                 Console.Write($"\n[{i + 1}/{selectedAccountsRaw.Count}] Checking {acc.Username}... ");
 
-                if (!acc.IsValid || string.IsNullOrEmpty(acc.Cookie)) { Console.WriteLine("Skipped (Marked Invalid or No Cookie)."); preCheckFailures++; continue; }
+                if (!acc.IsValid || string.IsNullOrEmpty(acc.Cookie))
+                {
+                    Console.WriteLine("Skipped (Marked Invalid or No Cookie)."); preCheckFailures++; continue;
+                }
+
                 string oldToken = acc.XcsrfToken;
                 bool tokenOk = await _authService.RefreshXCSRFTokenIfNeededAsync(acc);
 
-                if (!tokenOk) { Console.WriteLine("   -> Token Refresh/Validation FAILED."); preCheckFailures++; acc.IsValid = false; continue; }
+                if (!tokenOk)
+                {
+                    Console.WriteLine($"   -> Token Refresh/Validation FAILED. Account likely marked invalid.");
+                    preCheckFailures++;
+                    continue;
+                }
 
-                if (acc.XcsrfToken != oldToken && !string.IsNullOrEmpty(oldToken)) { Console.WriteLine($"   -> Token Refreshed."); preCheckRefreshed++; }
-                else if (string.IsNullOrEmpty(oldToken) && !string.IsNullOrEmpty(acc.XcsrfToken)) { Console.WriteLine($"   -> Token Initialized."); preCheckRefreshed++; }
-                else { Console.WriteLine($"   -> Token OK."); }
+                if (acc.XcsrfToken != oldToken && !string.IsNullOrEmpty(oldToken)) { Console.Write($"   -> Token Refreshed. "); preCheckRefreshed++; }
+                else if (string.IsNullOrEmpty(oldToken) && !string.IsNullOrEmpty(acc.XcsrfToken)) { Console.Write($"   -> Token Initialized. "); preCheckRefreshed++; }
+                else { Console.Write($"   -> Token OK. "); }
 
-                if (!acc.IsValid || string.IsNullOrEmpty(acc.XcsrfToken)) { Console.WriteLine($"   -> Account marked invalid after token check."); preCheckFailures++; continue; }
+                if (!acc.IsValid || string.IsNullOrEmpty(acc.XcsrfToken))
+                {
+                    Console.WriteLine($"   -> Account invalid after token check. Skipping further checks."); preCheckFailures++; continue;
+                }
 
                 selectedValidAccounts.Add(acc);
 
-                Console.Write($"   Checking friend count... ");
+                Console.Write($"Checking friend count... ");
                 int friendCount = await _friendService.GetFriendCountAsync(acc);
                 await Task.Delay(AppConfig.CurrentApiDelayMs / 3);
 
@@ -350,14 +458,15 @@ namespace Actions
                 }
             }
 
-            Console.WriteLine($"\n[*] Pre-check Summary:");
+            preCheckStopwatch.Stop();
+            Console.WriteLine($"\n[*] Pre-check Summary (Took {preCheckStopwatch.ElapsedMilliseconds}ms):");
             if (preCheckRefreshed > 0) Console.WriteLine($"   {preCheckRefreshed} tokens were refreshed/initialized.");
             if (preCheckFailures > 0) Console.WriteLine($"   {preCheckFailures} accounts skipped/failed (Invalid state or token issues).");
             if (friendCheckErrors > 0) Console.WriteLine($"   {friendCheckErrors} accounts had errors checking friend count (excluded from actions).");
             if (alreadyMetGoal > 0) Console.WriteLine($"   {alreadyMetGoal} valid accounts already met the friend goal ({friendGoal}) and were skipped.");
             Console.WriteLine($"   {accountsNeedingFriends.Count} valid accounts need friends and will proceed.");
 
-            accountsNeedingFriends = [.. accountsNeedingFriends.OrderBy(a => a.UserId)];
+            accountsNeedingFriends = accountsNeedingFriends.OrderBy(a => a.UserId).ToList();
             int count = accountsNeedingFriends.Count;
 
             if (count < 2)
@@ -365,145 +474,275 @@ namespace Actions
                 Console.WriteLine($"[!] Need at least 2 valid accounts *below the friend goal* for limited friend actions. Found {count}. Aborting friend cycle.");
                 return;
             }
-            if (count > 15 && !Environment.UserInteractive) { Console.WriteLine($"[!] Warning: Running limited friends for a large number ({count}) of accounts non-interactively may take a very long time and is prone to rate limits or captchas."); }
+
+            if (count > 15 && !Environment.UserInteractive)
+            {
+                Console.WriteLine($"[!] Warning: Running limited friends for a large number ({count}) of accounts non-interactively.");
+                Console.WriteLine($"   This may take a very long time and is prone to rate limits or captchas.");
+            }
+            else if (count > 15)
+            {
+                Console.WriteLine($"[*] Note: Running limited friends for a larger number ({count}) of accounts. This might take some time.");
+            }
 
             Console.WriteLine($"\n[*] Phase 1: Sending Friend Requests among {count} accounts needing friends...");
             int attemptedSends = 0, successSends = 0, failedSends = 0;
+            bool canProceedToPhase2 = false;
             var stopwatchSend = Stopwatch.StartNew();
-            var sendAttempts = new List<Tuple<long, long>>();
             int baseSendDelay = AppConfig.CurrentFriendActionDelayMs;
-            int sendRandomness = 500;
+            int sendRandomness = Math.Min(baseSendDelay / 2, 1500);
 
             for (int i = 0; i < count; i++)
             {
                 Account receiver = accountsNeedingFriends[i];
-                Account sender1 = accountsNeedingFriends[(i + 1) % count];
+
+                int sender1Index = (i + 1) % count;
+                Account sender1 = accountsNeedingFriends[sender1Index];
+
                 Account? sender2 = null;
-                if (count > 2) { sender2 = accountsNeedingFriends[(i + 2) % count]; if (sender1.UserId == sender2?.UserId) { sender2 = accountsNeedingFriends[(i + 3) % count]; if (sender1.UserId == sender2?.UserId) { sender2 = null; } } }
-
-                Console.WriteLine($"\n  Sending requests targeting: {receiver.Username} (Index {i})");
-
-                Console.WriteLine($"    Processing Send: {sender1.Username} -> {receiver.Username}"); attemptedSends++;
-                try
+                if (count > 2)
                 {
-                    bool sendOk1 = await _friendService.SendFriendRequestAsync(sender1, receiver.UserId, receiver.Username);
-                    await Task.Delay(Random.Shared.Next(Math.Max(AppConfig.MinAllowedDelayMs, baseSendDelay - sendRandomness), baseSendDelay + sendRandomness));
-                    if (sendOk1) { Console.WriteLine($"    -> Send OK"); successSends++; sendAttempts.Add(Tuple.Create(sender1.UserId, receiver.UserId)); }
-                    else { Console.WriteLine($"    -> Send Fail (API Error/Limit/Already Sent/Etc)"); failedSends++; }
+                    int sender2Index = (i + 2) % count;
+                    if (sender2Index != i && sender2Index != sender1Index)
+                    {
+                        sender2 = accountsNeedingFriends[sender2Index];
+                    }
                 }
-                catch (Exception ex) { Console.WriteLine($"    -> Error Sending S1: {ex.GetType().Name}"); failedSends++; }
 
-                if (sender2 != null && sender1.UserId != sender2.UserId)
+                Console.WriteLine($"\n  Sending requests targeting: {receiver.Username} (ID: {receiver.UserId}, Index {i})");
+
+                if (sender1.UserId != receiver.UserId)
                 {
-                    Console.WriteLine($"    Processing Send: {sender2.Username} -> {receiver.Username}"); attemptedSends++;
+                    Console.WriteLine($"    Processing Send: {sender1.Username} (ID: {sender1.UserId}) -> {receiver.Username}"); attemptedSends++;
                     try
                     {
-                        bool sendOk2 = await _friendService.SendFriendRequestAsync(sender2, receiver.UserId, receiver.Username);
-                        await Task.Delay(Random.Shared.Next(Math.Max(AppConfig.MinAllowedDelayMs, baseSendDelay - sendRandomness), baseSendDelay + sendRandomness));
-                        if (sendOk2) { Console.WriteLine($"    -> Send OK"); successSends++; sendAttempts.Add(Tuple.Create(sender2.UserId, receiver.UserId)); }
-                        else { Console.WriteLine($"    -> Send Fail (API Error/Limit/Already Sent/Etc)"); failedSends++; }
-                    }
-                    catch (Exception ex) { Console.WriteLine($"    -> Error Sending S2: {ex.GetType().Name}"); failedSends++; }
-                }
+                        if (!sender1.IsValid || string.IsNullOrEmpty(sender1.XcsrfToken))
+                        {
+                            Console.WriteLine($"    -> Send Fail (Sender {sender1.Username} became invalid/lost token)."); failedSends++;
+                        }
+                        else
+                        {
+                            var (sendOk, isPending, failureReason) = await _friendService.SendFriendRequestAsync(sender1, receiver.UserId, receiver.Username);
+                            await Task.Delay(Random.Shared.Next(Math.Max(AppConfig.MinAllowedDelayMs, baseSendDelay - sendRandomness), baseSendDelay + sendRandomness));
 
-                if (i < count - 1) await Task.Delay(Random.Shared.Next(AppConfig.CurrentApiDelayMs / 2, AppConfig.CurrentApiDelayMs));
+                            if (sendOk)
+                            {
+                                Console.WriteLine($"    -> Send OK"); successSends++; canProceedToPhase2 = true;
+                            }
+                            else if (isPending)
+                            {
+                                Console.WriteLine($"    -> Send Skipped/Pending (Reason: {failureReason})");
+                                canProceedToPhase2 = true;
+                            }
+                            else
+                            {
+                                Console.WriteLine($"    -> Send Fail ({failureReason})"); failedSends++;
+                            }
+                        }
+                    }
+                    catch (Exception ex) { Console.WriteLine($"    -> Error Sending S1 ({sender1.Username}): {ex.GetType().Name}"); failedSends++; }
+                }
+                else { Console.WriteLine($"    -> Internal error: sender1 == receiver for index {i}. Skipping send."); }
+
+                if (sender2 != null && sender2.UserId != receiver.UserId)
+                {
+                    Console.WriteLine($"    Processing Send: {sender2.Username} (ID: {sender2.UserId}) -> {receiver.Username}"); attemptedSends++;
+                    try
+                    {
+                        if (!sender2.IsValid || string.IsNullOrEmpty(sender2.XcsrfToken))
+                        {
+                            Console.WriteLine($"    -> Send Fail (Sender {sender2.Username} became invalid/lost token)."); failedSends++;
+                        }
+                        else
+                        {
+                            var (sendOk, isPending, failureReason) = await _friendService.SendFriendRequestAsync(sender2, receiver.UserId, receiver.Username);
+                            await Task.Delay(Random.Shared.Next(Math.Max(AppConfig.MinAllowedDelayMs, baseSendDelay - sendRandomness), baseSendDelay + sendRandomness));
+
+                            if (sendOk)
+                            {
+                                Console.WriteLine($"    -> Send OK"); successSends++; canProceedToPhase2 = true;
+                            }
+                            else if (isPending)
+                            {
+                                Console.WriteLine($"    -> Send Skipped/Pending (Reason: {failureReason})");
+                                canProceedToPhase2 = true;
+                            }
+                            else
+                            {
+                                Console.WriteLine($"    -> Send Fail ({failureReason})"); failedSends++;
+                            }
+                        }
+                    }
+                    catch (Exception ex) { Console.WriteLine($"    -> Error Sending S2 ({sender2.Username}): {ex.GetType().Name}"); failedSends++; }
+                }
+                else if (sender2 != null) { Console.WriteLine($"    -> Internal error: sender2 == receiver for index {i}. Skipping send."); }
+
+
+                if (i < count - 1)
+                {
+                    await Task.Delay(Random.Shared.Next(AppConfig.CurrentApiDelayMs / 3, AppConfig.CurrentApiDelayMs / 2));
+                }
             }
+
             stopwatchSend.Stop();
             Console.WriteLine($"[*] Phase 1 Complete: Sending Friend Requests.");
-            Console.WriteLine($"   Attempted Sends: {attemptedSends}, Successful: {successSends}, Failed: {failedSends}");
+            Console.WriteLine($"   Attempted Sends (Pairs): {attemptedSends}, Successful API Sends: {successSends}, Failed Sends/Errors: {failedSends}");
+            Console.WriteLine($"   (Skipped/Pending count not explicitly tracked but allows Phase 2 if detected)");
             Console.WriteLine($"   Time: {stopwatchSend.ElapsedMilliseconds}ms ({stopwatchSend.Elapsed.TotalSeconds:F1}s)");
 
-            if (successSends == 0)
+            if (!canProceedToPhase2)
             {
-                Console.WriteLine("\n[!] No friend requests were successfully sent in Phase 1. Skipping Phase 2.");
+                Console.WriteLine("\n[!] No friend requests were successfully sent OR detected as potentially pending in Phase 1. Skipping Phase 2.");
                 return;
             }
+            else if (successSends == 0 && canProceedToPhase2)
+            {
+                Console.WriteLine("\n[*] No *new* friend requests sent successfully, but proceeding to Phase 2 as existing/pending requests might be acceptable.");
+            }
 
-            int waitSeconds = 60;
-            Console.WriteLine($"\n[*] Waiting {waitSeconds} seconds before starting Phase 2 (Accepting Requests)...");
-            await Task.Delay(waitSeconds * 1000);
+            Console.WriteLine($"\n[*] Waiting {AppConfig.DefaultRequestTimeoutSec} seconds before starting Phase 2 (Accepting Requests)...");
+            await Task.Delay(AppConfig.DefaultRequestTimeoutSec);
 
-            Console.WriteLine($"\n[*] Phase 2: Fetching and Accepting Pending Friend Requests...");
-            int attemptedAccepts = 0, successAccepts = 0, failedAccepts = 0;
+            Console.WriteLine($"\n[*] Phase 2: Attempting to blindly accept expected friend requests...");
+            int attemptedAccepts = 0;
+            int successAccepts = 0;
+            int failedAcceptsPhase2 = 0;
+            int skippedAccepts = 0;
             var stopwatchAccept = Stopwatch.StartNew();
             var acceptedPairs = new HashSet<Tuple<long, long>>();
             int baseAcceptDelay = AppConfig.CurrentFriendActionDelayMs;
-            int acceptRandomness = 500;
+            int acceptRandomness = Math.Min(baseAcceptDelay / 2, 1500);
 
-            var needingFriendsIds = accountsNeedingFriends.Select(a => a.UserId).ToHashSet();
-
-            foreach (Account receiverAccount in accountsNeedingFriends)
+            for (int receiverIndex = 0; receiverIndex < count; receiverIndex++)
             {
-                Console.WriteLine($"\n  Processing receiver: {receiverAccount.Username}");
+                Account receiverAccount = accountsNeedingFriends[receiverIndex];
+                Console.WriteLine($"\n  Processing receiver: {receiverAccount.Username} (ID: {receiverAccount.UserId}, Index {receiverIndex})");
 
                 if (!receiverAccount.IsValid || string.IsNullOrEmpty(receiverAccount.XcsrfToken))
                 {
-                    Console.WriteLine($"    -> Skipping receiver (became invalid).");
+                    Console.WriteLine($"    -> Skipping receiver (became invalid or lost token).");
+                    skippedAccepts += (count > 2 ? 2 : 1);
                     continue;
                 }
 
-                Console.Write($"    Fetching pending requests...");
-                List<long> pendingSenderIds = await _friendService.GetPendingFriendRequestSendersAsync(receiverAccount);
-                await Task.Delay(AppConfig.CurrentApiDelayMs / 2);
+                int sender1Index = (receiverIndex + 1) % count;
+                Account potentialSender1 = accountsNeedingFriends[sender1Index];
 
-                if (pendingSenderIds.Count == 0)
+                Account? potentialSender2 = null;
+                if (count > 2)
                 {
-                    Console.WriteLine($" No pending requests found via API.");
-                    continue;
-                }
-                Console.WriteLine($" Found {pendingSenderIds.Count} total pending.");
-
-                List<long> relevantSenderIds = pendingSenderIds
-                    .Where(id => needingFriendsIds.Contains(id) && id != receiverAccount.UserId)
-                    .ToList();
-
-                if (relevantSenderIds.Count == 0)
-                {
-                    Console.WriteLine($"    None of the pending requests are from the other accounts in this friend cycle.");
-                    continue;
+                    int sender2Index = (receiverIndex + 2) % count;
+                    if (sender2Index != receiverIndex && sender2Index != sender1Index)
+                    {
+                        potentialSender2 = accountsNeedingFriends[sender2Index];
+                    }
+                    else { Console.WriteLine($"    -> Internal state warning: Calculated sender2 index ({sender2Index}) conflicts with receiver ({receiverIndex}) or sender1 ({sender1Index}) for count={count}."); }
                 }
 
-                Console.WriteLine($"    Found {relevantSenderIds.Count} relevant pending request(s) to accept.");
-
-                foreach (long senderId in relevantSenderIds)
+                AcceptAttemptResult result1 = AcceptAttemptResult.Skipped_AlreadyDone;
+                if (potentialSender1.UserId != receiverAccount.UserId)
                 {
-                    string senderUsername = accountsNeedingFriends.FirstOrDefault(a => a.UserId == senderId)?.Username ?? $"ID {senderId}";
-
-                    Console.WriteLine($"    Processing Accept: {senderUsername} -> {receiverAccount.Username}");
                     attemptedAccepts++;
-                    var currentPair = Tuple.Create(senderId, receiverAccount.UserId);
-                    if (acceptedPairs.Contains(currentPair)) { Console.WriteLine($"    -> Skipped (Already accepted in this run)"); continue; }
-
-                    Console.Write($"    Refreshing token for receiver {receiverAccount.Username}... ");
-                    bool receiverTokenOk = await _authService.RefreshXCSRFTokenIfNeededAsync(receiverAccount);
-                    if (!receiverTokenOk || !receiverAccount.IsValid || string.IsNullOrEmpty(receiverAccount.XcsrfToken))
+                    result1 = await TryAcceptRequestAsync(receiverAccount, potentialSender1, acceptedPairs, baseAcceptDelay, acceptRandomness);
+                    switch (result1)
                     {
-                        Console.WriteLine($"FAILED."); Console.WriteLine($"    -> Skipped (Receiver account {receiverAccount.Username} became invalid or token refresh failed before accept)."); failedAccepts++; continue;
+                        case AcceptAttemptResult.Accepted: successAccepts++; break;
+                        case AcceptAttemptResult.Failed: failedAcceptsPhase2++; break;
+                        case AcceptAttemptResult.Skipped_AlreadyDone:
+                        case AcceptAttemptResult.Skipped_InvalidSender:
+                        case AcceptAttemptResult.Skipped_InvalidReceiver: skippedAccepts++; break;
                     }
-                    Console.WriteLine("OK.");
-
-                    try
-                    {
-                        bool acceptOk = await _friendService.AcceptFriendRequestAsync(receiverAccount, senderId, senderUsername);
-                        await Task.Delay(Random.Shared.Next(Math.Max(AppConfig.MinAllowedDelayMs, baseAcceptDelay - acceptRandomness), baseAcceptDelay + acceptRandomness));
-                        if (acceptOk) { Console.WriteLine($"    -> Accept OK"); successAccepts++; acceptedPairs.Add(currentPair); }
-                        else { Console.WriteLine($"    -> Accept Fail (API Error/Already Friends?)"); failedAccepts++; }
-                    }
-                    catch (Exception ex) { Console.WriteLine($"    -> Error Accepting: {ex.GetType().Name}"); failedAccepts++; }
-
-                    if (relevantSenderIds.IndexOf(senderId) < relevantSenderIds.Count - 1) await Task.Delay(Random.Shared.Next(AppConfig.CurrentApiDelayMs / 3, AppConfig.CurrentApiDelayMs / 2));
                 }
+                else { Console.WriteLine($"    -> Internal error: potentialSender1 ({potentialSender1.Username}) is the same as receiver ({receiverAccount.Username}). Skipping accept attempt."); skippedAccepts++; }
 
-                if (accountsNeedingFriends.IndexOf(receiverAccount) < accountsNeedingFriends.Count - 1) await Task.Delay(Random.Shared.Next(AppConfig.CurrentApiDelayMs / 2, AppConfig.CurrentApiDelayMs));
 
+                AcceptAttemptResult result2 = AcceptAttemptResult.Skipped_AlreadyDone;
+                if (potentialSender2 != null && potentialSender2.UserId != receiverAccount.UserId)
+                {
+                    if (potentialSender2.UserId != potentialSender1.UserId)
+                    {
+                        attemptedAccepts++;
+                        result2 = await TryAcceptRequestAsync(receiverAccount, potentialSender2, acceptedPairs, baseAcceptDelay, acceptRandomness);
+                        switch (result2)
+                        {
+                            case AcceptAttemptResult.Accepted: successAccepts++; break;
+                            case AcceptAttemptResult.Failed: failedAcceptsPhase2++; break;
+                            case AcceptAttemptResult.Skipped_AlreadyDone:
+                            case AcceptAttemptResult.Skipped_InvalidSender:
+                            case AcceptAttemptResult.Skipped_InvalidReceiver: skippedAccepts++; break;
+                        }
+                        if (result1 != AcceptAttemptResult.Skipped_AlreadyDone || result2 != AcceptAttemptResult.Skipped_AlreadyDone)
+                            await Task.Delay(Random.Shared.Next(AppConfig.CurrentApiDelayMs / 4, AppConfig.CurrentApiDelayMs / 3));
+                    }
+                    else { Console.WriteLine($"    -> Internal error: potentialSender2 ({potentialSender2.Username}) is the same as potentialSender1 ({potentialSender1.Username}). Skipping second accept attempt."); skippedAccepts++; }
+                }
+                else if (potentialSender2 != null) { Console.WriteLine($"    -> Internal error: potentialSender2 ({potentialSender2.Username}) is the same as receiver ({receiverAccount.Username}). Skipping second accept attempt."); skippedAccepts++; }
+
+
+                if (receiverIndex < count - 1)
+                {
+                    await Task.Delay(Random.Shared.Next(AppConfig.CurrentApiDelayMs / 2, AppConfig.CurrentApiDelayMs));
+                }
             }
 
             stopwatchAccept.Stop();
-            Console.WriteLine($"\n[*] Phase 2 Complete: Accepting Friend Requests.");
-            Console.WriteLine($"   Attempted Accepts (based on fetched pending): {attemptedAccepts}, Successful: {successAccepts} ({acceptedPairs.Count} unique pairs confirmed), Failed: {failedAccepts}");
+            Console.WriteLine($"\n[*] Phase 2 Complete: Attempted Blind Accepts.");
+            Console.WriteLine($"   Attempted Accepts (Expected Pairs): {attemptedAccepts}, Successful API Accepts: {successAccepts} ({acceptedPairs.Count} unique pairs confirmed), Failed API Accepts/Errors: {failedAcceptsPhase2}, Skipped (Pre-checks/Invalid): {skippedAccepts}");
             Console.WriteLine($"   Time: {stopwatchAccept.ElapsedMilliseconds}ms ({stopwatchAccept.Elapsed.TotalSeconds:F1}s)");
             Console.WriteLine($"[*] Limited friend action cycle finished for accounts needing friends.");
             Console.WriteLine($"   Reminder: Check accounts with Verify action to confirm final friend counts.");
+        }
+
+        private async Task<AcceptAttemptResult> TryAcceptRequestAsync(
+            Account receiver,
+            Account sender,
+            HashSet<Tuple<long, long>> acceptedPairs,
+            int baseDelay,
+            int randomness)
+        {
+            Console.WriteLine($"    Attempting Accept: {sender.Username} (ID: {sender.UserId}) -> {receiver.Username} (ID: {receiver.UserId})");
+
+            var currentPair = Tuple.Create(sender.UserId, receiver.UserId);
+            if (acceptedPairs.Contains(currentPair))
+            {
+                Console.WriteLine($"    -> Skipped (Already accepted in this run)");
+                return AcceptAttemptResult.Skipped_AlreadyDone;
+            }
+
+            if (!sender.IsValid)
+            {
+                Console.WriteLine($"    -> Accept Skip (Sender {sender.Username} is marked invalid).");
+                return AcceptAttemptResult.Skipped_InvalidSender;
+            }
+
+            if (!receiver.IsValid || string.IsNullOrEmpty(receiver.XcsrfToken))
+            {
+                Console.WriteLine($"    -> Accept Fail (Receiver account {receiver.Username} is invalid or missing token before accept).");
+                return AcceptAttemptResult.Skipped_InvalidReceiver;
+            }
+
+            try
+            {
+                bool acceptOk = await _friendService.AcceptFriendRequestAsync(receiver, sender.UserId, sender.Username);
+                await Task.Delay(Random.Shared.Next(Math.Max(AppConfig.MinAllowedDelayMs, baseDelay - randomness), baseDelay + randomness));
+
+                if (acceptOk)
+                {
+                    Console.WriteLine($"    -> Accept OK");
+                    acceptedPairs.Add(currentPair);
+                    return AcceptAttemptResult.Accepted;
+                }
+                else
+                {
+                    Console.WriteLine($"    -> Accept Fail (API Error/Not Pending/Already Friends?)");
+                    return AcceptAttemptResult.Failed;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    -> Error Accepting ({sender.Username} -> {receiver.Username}): {ex.GetType().Name} - {ConsoleUI.Truncate(ex.Message)}");
+                return AcceptAttemptResult.Failed;
+            }
         }
 
         public async Task<bool> VerifyAccountStatusOnSelectedAsync(
@@ -513,87 +752,165 @@ namespace Actions
             long expectedAvatarSourceId = AppConfig.DefaultTargetUserIdForAvatarCopy)
         {
             _accountManager.ClearVerificationResults();
-            var accountsToProcess = _accountManager.GetSelectedAccounts().Where(acc => acc != null && acc.IsValid).ToList();
-            int totalSelected = _accountManager.GetSelectedAccounts().Count; int validCount = accountsToProcess.Count; int skippedCount = totalSelected - validCount;
+            var selectedAccountsRaw = _accountManager.GetSelectedAccounts();
+            var accountsToProcess = selectedAccountsRaw.Where(acc => acc != null && acc.IsValid).ToList();
+
+            int totalSelected = selectedAccountsRaw.Count;
+            int validCount = accountsToProcess.Count;
+            int skippedInvalidCount = totalSelected - validCount;
+
             Console.WriteLine($"\n[>>] Executing Action: Verify Account Status for {validCount} valid account(s)...");
-            Console.WriteLine($"   Requirements: Friends >= {requiredFriends}, Badges >= {requiredBadges} (Top 10), Name == '{expectedDisplayName}', Avatar Source == {expectedAvatarSourceId}");
-            if (skippedCount > 0) Console.WriteLine($"   ({skippedCount} selected accounts were invalid and will be skipped)");
+            Console.WriteLine($"   Requirements: Friends >= {requiredFriends}, Badges >= {requiredBadges} (Recent), Name == '{expectedDisplayName}', Avatar Source == {expectedAvatarSourceId}");
+            if (skippedInvalidCount > 0) Console.WriteLine($"   ({skippedInvalidCount} selected accounts were invalid and will be skipped)");
             if (validCount == 0) { Console.WriteLine($"[!] No valid accounts selected for verification."); return false; }
 
-            AvatarDetails? targetAvatarDetails = await GetOrFetchTargetAvatarDetailsAsync(expectedAvatarSourceId);
-            int passedCount = 0, failedReqCount = 0, failedErrCount = 0; var stopwatch = Stopwatch.StartNew();
+            AvatarDetails? targetAvatarDetails = null;
+            if (expectedAvatarSourceId > 0)
+            {
+                targetAvatarDetails = await GetOrFetchTargetAvatarDetailsAsync(expectedAvatarSourceId);
+                if (targetAvatarDetails == null)
+                {
+                    Console.WriteLine($"[!] Warning: Could not fetch target avatar details for ID {expectedAvatarSourceId}. Avatar check will be skipped for all accounts.");
+                }
+            }
+            else { Console.WriteLine("[*] Skipping avatar check: No target avatar source ID specified (or <= 0)."); }
+
+            int passedCount = 0, failedReqCount = 0, failedErrCount = 0;
+            var stopwatch = Stopwatch.StartNew();
+            int checkDelay = AppConfig.CurrentApiDelayMs / 4;
 
             for (int i = 0; i < accountsToProcess.Count; i++)
             {
                 Account acc = accountsToProcess[i];
                 Console.WriteLine($"\n[{i + 1}/{validCount}] Verifying: {acc.Username} (ID: {acc.UserId})");
-                int friendCount = -1, badgeCount = -1; string? currentDisplayName = null; AvatarDetails? currentAvatarDetails = null;
-                bool errorOccurred = false; VerificationStatus currentStatus = VerificationStatus.NotChecked;
+                int friendCount = -1, badgeCount = -1;
+                string? currentDisplayName = null;
+                AvatarDetails? currentAvatarDetails = null;
+                bool errorOccurred = false;
+                VerificationStatus currentStatus = VerificationStatus.NotChecked;
+                List<string> failureReasons = new List<string>();
+
                 try
                 {
-                    Console.Write("   Checking Friends... "); friendCount = await _friendService.GetFriendCountAsync(acc);
-                    if (friendCount == -1) { Console.WriteLine("Failed."); errorOccurred = true; } else { Console.WriteLine($"{friendCount} found."); }
-                    if (!errorOccurred) await Task.Delay(AppConfig.CurrentApiDelayMs / 4);
+                    Console.Write("   Checking Friends... ");
+                    friendCount = await _friendService.GetFriendCountAsync(acc);
+                    if (friendCount == -1) { Console.WriteLine("Failed."); errorOccurred = true; failureReasons.Add("Friend check API failed"); }
+                    else { Console.WriteLine($"{friendCount} found."); if (friendCount < requiredFriends) failureReasons.Add($"Friends {friendCount} < {requiredFriends}"); }
+                    if (!errorOccurred) await Task.Delay(checkDelay); else goto EndVerificationCheck;
 
-                    if (!errorOccurred)
+                    Console.Write("   Checking Badges... ");
+                    badgeCount = await _badgeService.GetBadgeCountAsync(acc, limit: 100);
+                    if (badgeCount == -1) { Console.WriteLine("Failed."); errorOccurred = true; failureReasons.Add("Badge check API failed"); }
+                    else { Console.WriteLine($"{badgeCount} found (Recent)."); if (badgeCount < requiredBadges) failureReasons.Add($"Badges {badgeCount} < {requiredBadges}"); }
+                    if (!errorOccurred) await Task.Delay(checkDelay); else goto EndVerificationCheck;
+
+                    Console.Write("   Checking Display Name... ");
+                    (currentDisplayName, _) = await _userService.GetUsernamesAsync(acc);
+                    if (currentDisplayName == null) { Console.WriteLine("Failed."); errorOccurred = true; failureReasons.Add("Display name check API failed"); }
+                    else { Console.WriteLine($"'{currentDisplayName}' found."); if (!string.Equals(currentDisplayName, expectedDisplayName, StringComparison.OrdinalIgnoreCase)) failureReasons.Add($"Name '{currentDisplayName}' != '{expectedDisplayName}'"); }
+                    if (!errorOccurred) await Task.Delay(checkDelay); else goto EndVerificationCheck;
+
+                    if (targetAvatarDetails != null)
                     {
-                        Console.Write("   Checking Badges... "); badgeCount = await _badgeService.GetBadgeCountAsync(acc, limit: 10);
-                        if (badgeCount == -1) { Console.WriteLine("Failed."); errorOccurred = true; } else { Console.WriteLine($"{badgeCount} found (Top 10)."); }
-                        if (!errorOccurred) await Task.Delay(AppConfig.CurrentApiDelayMs / 4);
+                        Console.Write("   Checking Avatar... ");
+                        currentAvatarDetails = await _avatarService.FetchAvatarDetailsAsync(acc.UserId);
+                        if (currentAvatarDetails == null) { Console.WriteLine("Failed."); errorOccurred = true; failureReasons.Add("Avatar fetch API failed"); }
+                        else
+                        {
+                            Console.WriteLine($"Details retrieved.");
+                            if (!_avatarService.CompareAvatarDetails(currentAvatarDetails, targetAvatarDetails)) failureReasons.Add("Avatar mismatch");
+                        }
                     }
-                    if (!errorOccurred)
-                    {
-                        Console.Write("   Checking Display Name... "); currentDisplayName = await _userService.GetCurrentDisplayNameAsync(acc);
-                        if (currentDisplayName == null) { Console.WriteLine("Failed."); errorOccurred = true; } else { Console.WriteLine($"'{currentDisplayName}' found."); }
-                        if (!errorOccurred) await Task.Delay(AppConfig.CurrentApiDelayMs / 4);
-                    }
-                    if (!errorOccurred && targetAvatarDetails != null)
-                    {
-                        Console.Write("   Checking Avatar... "); currentAvatarDetails = await _avatarService.FetchAvatarDetailsAsync(acc.UserId);
-                        if (currentAvatarDetails == null) { Console.WriteLine("Failed."); errorOccurred = true; } else { Console.WriteLine($"Details retrieved."); }
-                    }
-                    else if (targetAvatarDetails == null) { Console.WriteLine("   Skipping Avatar Check (Target details unavailable)."); }
+                    else { Console.WriteLine("   Skipping Avatar Check (Target details unavailable/not specified)."); }
+
+                EndVerificationCheck:;
 
                     if (errorOccurred)
                     {
-                        currentStatus = VerificationStatus.Error; Console.WriteLine($"   -> Status: ERROR (Data Fetch Failed)"); failedErrCount++;
+                        currentStatus = VerificationStatus.Error;
+                        Console.WriteLine($"   -> Status: ERROR ({string.Join(", ", failureReasons)})");
+                        failedErrCount++;
                     }
                     else
                     {
-                        bool friendsOk = friendCount >= requiredFriends; bool badgesOk = badgeCount >= requiredBadges;
+                        bool friendsOk = friendCount >= requiredFriends;
+                        bool badgesOk = badgeCount >= requiredBadges;
                         bool displayNameOk = string.Equals(currentDisplayName, expectedDisplayName, StringComparison.OrdinalIgnoreCase);
-                        bool avatarOk = targetAvatarDetails == null || (currentAvatarDetails != null && _avatarService.CompareAvatarDetails(currentAvatarDetails, targetAvatarDetails));
-                        string fStat = friendsOk ? "OK" : "FAIL"; string bStat = badgesOk ? "OK" : "FAIL"; string nStat = displayNameOk ? "OK" : "FAIL";
-                        string aStat = targetAvatarDetails == null ? "SKIP" : (currentAvatarDetails == null ? "ERR" : (avatarOk ? "OK" : "FAIL"));
-                        Console.WriteLine($"   -> Friends:       {friendCount} (Req: {requiredFriends}) [{fStat}]");
-                        Console.WriteLine($"   -> Badges:        {badgeCount} (Req: {requiredBadges}) [{bStat}]");
-                        Console.WriteLine($"   -> Display Name:  '{currentDisplayName ?? "N/A"}' (Exp: '{expectedDisplayName}') [{nStat}]");
-                        Console.WriteLine($"   -> Avatar Match:  (Src: {expectedAvatarSourceId}) [{aStat}]");
-                        if (friendsOk && badgesOk && displayNameOk && avatarOk) { currentStatus = VerificationStatus.Passed; Console.WriteLine($"   -> Overall Status: PASS"); passedCount++; }
-                        else { currentStatus = VerificationStatus.Failed; Console.WriteLine($"   -> Overall Status: FAIL (Reqs Not Met)"); failedReqCount++; }
+                        bool avatarOk = targetAvatarDetails == null ||
+                                        (currentAvatarDetails != null && _avatarService.CompareAvatarDetails(currentAvatarDetails, targetAvatarDetails));
+
+                        string fStat = friendsOk ? "OK" : $"FAIL ({friendCount}/{requiredFriends})";
+                        string bStat = badgesOk ? "OK" : $"FAIL ({badgeCount}/{requiredBadges})";
+                        string nStat = displayNameOk ? "OK" : $"FAIL ('{currentDisplayName ?? "N/A"}' != '{expectedDisplayName}')";
+                        string aStat;
+                        if (targetAvatarDetails == null) aStat = "SKIP (No Target)";
+                        else if (currentAvatarDetails == null) aStat = "ERR (Fetch Failed)";
+                        else aStat = avatarOk ? "OK" : "FAIL (Mismatch)";
+
+                        Console.WriteLine($"   -> Friends:       {fStat}");
+                        Console.WriteLine($"   -> Badges:        {bStat}");
+                        Console.WriteLine($"   -> Display Name:  {nStat}");
+                        Console.WriteLine($"   -> Avatar Match:  {aStat} (Source: {expectedAvatarSourceId})");
+
+                        if (friendsOk && badgesOk && displayNameOk && avatarOk)
+                        {
+                            currentStatus = VerificationStatus.Passed;
+                            Console.WriteLine($"   -> Overall Status: PASS");
+                            passedCount++;
+                        }
+                        else
+                        {
+                            currentStatus = VerificationStatus.Failed;
+                            Console.WriteLine($"   -> Overall Status: FAIL ({string.Join("; ", failureReasons)})");
+                            failedReqCount++;
+                        }
                     }
                 }
-                catch (Exception ex) { Console.WriteLine($"[!] Runtime Error: {ex.GetType().Name} - {ex.Message}"); currentStatus = VerificationStatus.Error; failedErrCount++; }
-                finally { _accountManager.SetVerificationStatus(acc.UserId, currentStatus); if (i < accountsToProcess.Count - 1) await Task.Delay(AppConfig.MinAllowedDelayMs / 2); }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[!] Runtime Error during verification for {acc.Username}: {ex.GetType().Name} - {ex.Message}");
+                    currentStatus = VerificationStatus.Error;
+                    failureReasons.Add($"Runtime Error: {ex.GetType().Name}");
+                    failedErrCount++;
+                }
+                finally
+                {
+                    _accountManager.SetVerificationStatus(acc.UserId, currentStatus, string.Join("; ", failureReasons));
+                    if (i < accountsToProcess.Count - 1) await Task.Delay(AppConfig.MinAllowedDelayMs / 2);
+                }
             }
+
             stopwatch.Stop();
+
             Console.WriteLine($"\n[<<] Action 'Verify Account Status' Finished.");
-            Console.WriteLine($"   Passed: {passedCount}, Failed (Reqs): {failedReqCount}, Failed (Error): {failedErrCount}, Skipped (Invalid): {skippedCount}");
+            Console.WriteLine($"   Passed: {passedCount}, Failed (Reqs): {failedReqCount}, Failed (Error): {failedErrCount}");
+            if (skippedInvalidCount > 0) Console.WriteLine($"   Skipped (Invalid): {skippedInvalidCount}");
+            Console.WriteLine($"   --------------------------------");
+            Console.WriteLine($"   Total Verified: {validCount}");
             Console.WriteLine($"   Total Time: {stopwatch.ElapsedMilliseconds}ms ({stopwatch.Elapsed.TotalSeconds:F1}s)");
+
             return failedReqCount > 0 || failedErrCount > 0;
         }
 
         public async Task ExecuteAllAutoAsync()
         {
             Console.WriteLine($"\n[*] Executing Action: Execute All Auto (Uses Defaults)");
-            Console.WriteLine($"   Sequence: Set Name -> Set Avatar -> Limited Friends -> Get Badges (if interactive)");
+            Console.WriteLine($"   Sequence: Set Name -> Set Avatar -> Limited Friends -> Get Badges (if interactive/configured)");
             Console.WriteLine($"   Defaults: Name='{AppConfig.DefaultDisplayName}', AvatarSrc={AppConfig.DefaultTargetUserIdForAvatarCopy}, FriendGoal={AppConfig.DefaultFriendGoal}, BadgeGoal={AppConfig.DefaultBadgeGoal}, BadgeGame={AppConfig.DefaultBadgeGameId}");
-            Console.WriteLine($"   (Actions will be skipped if prerequisites are already met)");
+            Console.WriteLine($"   (Actions will be skipped per-account if prerequisites are already met)");
+            Console.WriteLine($"   (Failed actions may retry based on config: Retries={AppConfig.CurrentMaxApiRetries}, Delay={AppConfig.CurrentApiRetryDelayMs}ms)");
 
+            Console.WriteLine("\n--- Starting: Set Display Name ---");
             await SetDisplayNameOnSelectedAsync();
+
+            Console.WriteLine("\n--- Starting: Set Avatar ---");
             await SetAvatarOnSelectedAsync();
+
+            Console.WriteLine("\n--- Starting: Limited Friend Actions ---");
             await HandleLimitedFriendRequestsAsync();
 
+            Console.WriteLine("\n--- Starting: Get Badges ---");
+            
             if (!Environment.UserInteractive)
             {
                 Console.WriteLine("[!] Skipping 'Get Badges' step in non-interactive environment for 'Execute All Auto'.");
@@ -603,7 +920,8 @@ namespace Actions
                 await GetBadgesOnSelectedAsync(AppConfig.DefaultBadgeGoal);
             }
 
-            Console.WriteLine($"\n[*] Multi-Action Sequence Complete.");
+            Console.WriteLine($"\n[*] Multi-Action Sequence 'Execute All Auto' Complete.");
+            Console.WriteLine($"[*] Suggestion: Run 'Verify Account Status' (Action 7) to check final state.");
         }
     }
 }

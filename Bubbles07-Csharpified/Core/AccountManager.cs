@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Models;
 using Roblox.Services;
+using UI;
 
 namespace Core
 {
@@ -13,7 +14,7 @@ namespace Core
     {
         private readonly List<Account> _accounts = new List<Account>();
         private readonly List<int> _selectedAccountIndices = new List<int>();
-        private readonly Dictionary<long, VerificationStatus> _lastVerificationResults = new Dictionary<long, VerificationStatus>();
+        private readonly Dictionary<long, (VerificationStatus Status, string Details)> _verificationResults = new Dictionary<long, (VerificationStatus, string)>();
         private readonly AuthenticationService _authService;
         private readonly object _lock = new object();
 
@@ -134,7 +135,7 @@ namespace Core
                     {
                         try
                         {
-                            Console.Write($"[{currentIndex + 1}/{cookiesToImport.Count}] Processing {TruncateForLog(cookie, 20)}... ");
+                            Console.Write($"[{currentIndex + 1}/{cookiesToImport.Count}] Processing {ConsoleUI.Truncate(cookie, 20)}... ");
                             bool alreadyExists;
                             lock (_lock) { alreadyExists = _accounts.Any(a => a.Cookie == cookie); }
                             if (alreadyExists) { Console.WriteLine($"Duplicate (in roster)."); Interlocked.Increment(ref duplicateCount); return; }
@@ -158,7 +159,7 @@ namespace Core
                             }
                             else { Console.WriteLine($"Invalid."); Interlocked.Increment(ref invalidCount); }
                         }
-                        catch (Exception ex) { Console.WriteLine($"Error Processing {TruncateForLog(cookie, 20)}: {ex.Message}"); Interlocked.Increment(ref invalidCount); }
+                        catch (Exception ex) { Console.WriteLine($"Error Processing {ConsoleUI.Truncate(cookie, 20)}: {ex.Message}"); Interlocked.Increment(ref invalidCount); }
                         finally { semaphore.Release(); }
                         await Task.Delay(150);
                     }));
@@ -258,7 +259,7 @@ namespace Core
         {
             lock (_lock)
             {
-                if (_lastVerificationResults.Count == 0)
+                if (_verificationResults.Count == 0)
                 {
                     Console.WriteLine("[!] Verification check has not been run recently. Run the Verify action first.");
                     return;
@@ -268,8 +269,8 @@ namespace Core
                 int count = 0;
                 for (int i = 0; i < _accounts.Count; i++)
                 {
-                    if (_lastVerificationResults.TryGetValue(_accounts[i].UserId, out var status) &&
-                        (status == VerificationStatus.Failed || status == VerificationStatus.Error))
+                    if (_verificationResults.TryGetValue(_accounts[i].UserId, out var result) &&
+                        (result.Status == VerificationStatus.Failed || result.Status == VerificationStatus.Error))
                     {
                         _selectedAccountIndices.Add(i);
                         count++;
@@ -288,16 +289,24 @@ namespace Core
         {
             lock (_lock)
             {
-                _lastVerificationResults.TryGetValue(userId, out var status);
-                return status;
+                if (_verificationResults.TryGetValue(userId, out var result))
+                {
+                    return result.Status;
+                }
+                return VerificationStatus.NotChecked;
             }
         }
 
-        public void SetVerificationStatus(long userId, VerificationStatus status)
+        public void SetVerificationStatus(long userId, VerificationStatus status, string details)
         {
             lock (_lock)
             {
-                _lastVerificationResults[userId] = status;
+                _verificationResults[userId] = (status, details ?? string.Empty);
+
+                var account = GetAccountById(userId);
+                if (account != null)
+                {
+                }
             }
         }
 
@@ -305,14 +314,16 @@ namespace Core
         {
             lock (_lock)
             {
-                _lastVerificationResults.Clear();
+                _verificationResults.Clear();
             }
         }
 
-        private static string TruncateForLog(string? value, int maxLength = 30)
+        private Account? GetAccountById(long userId)
         {
-            if (string.IsNullOrEmpty(value)) return string.Empty;
-            return value.Length <= maxLength ? string.Concat(value.AsSpan(0, maxLength), "...") : value;
+            lock (_lock)
+            {
+                return _accounts.FirstOrDefault(a => a.UserId == userId);
+            }
         }
     }
 }

@@ -1,19 +1,25 @@
-﻿using System;
-using System.Linq;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Net.Http.Headers;
 using Models;
 using Roblox.Http;
+using System;
+using System.Net.Http;
+using System.Threading.Tasks;
+using System.Linq;
 using _Csharpified;
+using System.Threading;
+using UI;
+using System.Net;
 
 namespace Roblox.Services
 {
     public class AuthenticationService
     {
         private readonly RobloxHttpClient _robloxHttpClient;
-        private static readonly HttpClient directHttpClient = new HttpClient(new HttpClientHandler { UseCookies = false, AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate });
+        private static readonly HttpClient directHttpClient = new HttpClient(new HttpClientHandler
+        {
+            UseCookies = false,
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
+        });
 
         public AuthenticationService(RobloxHttpClient robloxHttpClient)
         {
@@ -32,15 +38,22 @@ namespace Roblox.Services
 
         public async Task<bool> RefreshXCSRFTokenIfNeededAsync(Account account)
         {
-            if (account == null || string.IsNullOrWhiteSpace(account.Cookie))
+            if (account == null)
             {
-                Console.WriteLine("[!] Cannot refresh XCSRF: Account or Cookie is null/empty.");
+                Console.WriteLine("[!] Cannot refresh XCSRF: Account object is null.");
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(account.Cookie))
+            {
+                Console.WriteLine($"[!] Cannot refresh XCSRF for User ID {account.UserId}: Cookie is missing.");
+                account.IsValid = false;
+                account.XcsrfToken = "";
                 return false;
             }
 
             string url = $"{AppConfig.RobloxApiBaseUrl_Friends}/v1/users/{account.UserId}/friends/count";
 
-            var (success, content) = await _robloxHttpClient.SendRequestAndReadAsync(
+            var (_, success, _) = await _robloxHttpClient.SendRequestAndReadAsync(
                 HttpMethod.Get,
                 url,
                 account,
@@ -56,7 +69,6 @@ namespace Roblox.Services
             else
             {
                 Console.WriteLine($"[-] XCSRF token for {account.Username} could not be validated or refreshed via API check.");
-                if (string.IsNullOrEmpty(account.XcsrfToken)) account.IsValid = false;
 
                 if (account.IsValid && !string.IsNullOrWhiteSpace(account.Cookie))
                 {
@@ -93,9 +105,19 @@ namespace Roblox.Services
 
         public async Task<string?> GetAuthenticationTicketAsync(Account account, string gameId)
         {
+            if (account == null)
+            {
+                Console.WriteLine($"[-] Cannot Get Auth Ticket: Account is null.");
+                return null;
+            }
             if (string.IsNullOrEmpty(account.XcsrfToken) || string.IsNullOrWhiteSpace(account.Cookie))
             {
                 Console.WriteLine($"[-] Cannot Get Auth Ticket for {account.Username}: Missing XCSRF token or Cookie.");
+                return null;
+            }
+            if (string.IsNullOrWhiteSpace(gameId) || !long.TryParse(gameId, out _))
+            {
+                Console.WriteLine($"[-] Cannot Get Auth Ticket for {account.Username}: Invalid Game ID '{gameId}'.");
                 return null;
             }
 
@@ -105,45 +127,47 @@ namespace Roblox.Services
 
             bool retried = false;
         retry_auth_request:
+            HttpResponseMessage? rawAuthResponse = null;
             try
             {
                 Console.WriteLine($"[>] Requesting game authentication ticket for {account.Username}...");
 
                 using var request = new HttpRequestMessage(HttpMethod.Post, authUrl);
-                request.Headers.Add("Cookie", $".ROBLOSECURITY={account.Cookie}");
 
+                request.Headers.TryAddWithoutValidation("Cookie", $".ROBLOSECURITY={account.Cookie}");
                 if (!string.IsNullOrEmpty(account.XcsrfToken))
                 {
-                    request.Headers.Add("X-CSRF-TOKEN", account.XcsrfToken);
+                    if (request.Headers.Contains("X-CSRF-TOKEN")) request.Headers.Remove("X-CSRF-TOKEN");
+                    request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", account.XcsrfToken);
                 }
                 else
                 {
                     Console.WriteLine($"[-] Cannot Get Auth Ticket for {account.Username}: XCSRF token became empty before request.");
                     return null;
                 }
-
-                request.Content = authContent;
-                request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-
                 request.Headers.UserAgent.ParseAdd("Roblox/WinInet");
+                request.Headers.TryAddWithoutValidation("Origin", AppConfig.RobloxWebBaseUrl);
                 try
                 {
                     request.Headers.Referrer = new Uri($"{AppConfig.RobloxWebBaseUrl}/games/{gameId}/");
                 }
                 catch (FormatException ex)
                 {
-                    Console.WriteLine($"[!] Invalid game ID '{gameId}' for Referrer header: {ex.Message}");
+                    Console.WriteLine($"[!] Warning: Invalid game ID '{gameId}' for Referrer header: {ex.Message}. Proceeding without Referrer.");
                 }
-                request.Headers.TryAddWithoutValidation("Origin", AppConfig.RobloxWebBaseUrl);
+                request.Headers.Accept.ParseAdd("application/json, text/plain, */*");
+
+                request.Content = authContent;
 
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(AppConfig.DefaultRequestTimeoutSec));
-                HttpResponseMessage rawAuthResponse = await directHttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                rawAuthResponse = await directHttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
 
                 string authResponseContent = "";
 
-                if (rawAuthResponse.IsSuccessStatusCode && rawAuthResponse.Headers.TryGetValues("RBX-Authentication-Ticket", out var ticketValues))
+                if (rawAuthResponse.IsSuccessStatusCode &&
+                    rawAuthResponse.Headers.TryGetValues("RBX-Authentication-Ticket", out var ticketValues))
                 {
-                    authTicket = ticketValues.FirstOrDefault();
+                    authTicket = ticketValues?.FirstOrDefault();
                     if (!string.IsNullOrEmpty(authTicket))
                     {
                         Console.WriteLine($"[+] Auth Ticket Obtained for {account.Username}.");
@@ -152,13 +176,15 @@ namespace Roblox.Services
                     else
                     {
                         authResponseContent = await rawAuthResponse.Content.ReadAsStringAsync();
-                        Console.WriteLine($"[-] Auth ticket header present but empty for {account.Username}? Status: {rawAuthResponse.StatusCode}. Details: {TruncateForLog(authResponseContent)}");
+                        Console.WriteLine($"[-] Auth ticket header present but empty for {account.Username}? Status: {rawAuthResponse.StatusCode}. Details: {ConsoleUI.Truncate(authResponseContent)}");
                         return null;
                     }
                 }
-                else if (rawAuthResponse.StatusCode == System.Net.HttpStatusCode.Forbidden && rawAuthResponse.Headers.TryGetValues("X-CSRF-TOKEN", out var xcsrfValues) && !retried)
+                else if (rawAuthResponse.StatusCode == System.Net.HttpStatusCode.Forbidden &&
+                         rawAuthResponse.Headers.TryGetValues("X-CSRF-TOKEN", out var xcsrfValues) &&
+                         !retried)
                 {
-                    string? newToken = xcsrfValues.FirstOrDefault();
+                    string? newToken = xcsrfValues?.FirstOrDefault();
                     if (!string.IsNullOrEmpty(newToken) && newToken != account.XcsrfToken)
                     {
                         Console.WriteLine($"[!] Auth ticket request (403): XCSRF Rotation Detected for {account.Username}. Updating token and retrying...");
@@ -169,14 +195,15 @@ namespace Roblox.Services
                     }
                     else
                     {
-                        Console.WriteLine($"[!] Auth ticket request (403) for {account.Username}: XCSRF token on response was not new or was missing. Cannot retry based on XCSRF.");
+                        authResponseContent = await rawAuthResponse.Content.ReadAsStringAsync();
+                        Console.WriteLine($"[!] Auth ticket request (403) for {account.Username}: XCSRF token on response was not new ('{newToken}') or was missing. Cannot retry based on XCSRF. Body: {ConsoleUI.Truncate(authResponseContent)}");
                         return null;
                     }
                 }
                 else if (rawAuthResponse.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 {
                     authResponseContent = await rawAuthResponse.Content.ReadAsStringAsync();
-                    Console.WriteLine($"[-] Failed to get auth ticket for {account.Username}: Unauthorized (401). Cookie may be invalid. Marking invalid. Details: {TruncateForLog(authResponseContent)}");
+                    Console.WriteLine($"[-] Failed to get auth ticket for {account.Username}: Unauthorized (401). Cookie may be invalid. Marking invalid. Details: {ConsoleUI.Truncate(authResponseContent)}");
                     account.IsValid = false;
                     account.XcsrfToken = "";
                     return null;
@@ -184,7 +211,7 @@ namespace Roblox.Services
                 else
                 {
                     authResponseContent = await rawAuthResponse.Content.ReadAsStringAsync();
-                    Console.WriteLine($"[-] Failed to get auth ticket for {account.Username}. Status: {(int)rawAuthResponse.StatusCode} ({rawAuthResponse.ReasonPhrase}). Details: {TruncateForLog(authResponseContent)}");
+                    Console.WriteLine($"[-] Failed to get auth ticket for {account.Username}. Status: {(int)rawAuthResponse.StatusCode} ({rawAuthResponse.ReasonPhrase}). Details: {ConsoleUI.Truncate(authResponseContent)}");
                     if (authResponseContent.Contains("Captcha", StringComparison.OrdinalIgnoreCase))
                     {
                         Console.WriteLine($"[!] CAPTCHA required for auth ticket? Action cannot proceed automatically.");
@@ -197,12 +224,7 @@ namespace Roblox.Services
             catch (HttpRequestException hrex) { Console.WriteLine($"[!] Network error getting auth ticket for {account.Username}: {hrex.Message}"); return null; }
             catch (UriFormatException ufex) { Console.WriteLine($"[!] URL format error during auth ticket request for {account.Username}: {ufex.Message} (Check GameID/URLs)"); return null; }
             catch (Exception ex) { Console.WriteLine($"[!] Exception getting auth ticket for {account.Username}: {ex.GetType().Name} - {ex.Message}"); return null; }
-        }
-
-        private static string TruncateForLog(string? value, int maxLength = 100)
-        {
-            if (string.IsNullOrEmpty(value)) return string.Empty;
-            return value.Length <= maxLength ? value[..maxLength] + "..." : value;
+            finally { rawAuthResponse?.Dispose(); }
         }
     }
 }
