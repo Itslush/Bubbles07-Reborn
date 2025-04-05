@@ -4,46 +4,36 @@ using System.Text;
 using Models;
 using _Csharpified;
 using Roblox.Services;
-using System;
-using System.Threading.Tasks;
 using System.ComponentModel;
-using System.Linq;
-using System.Collections.Generic;
 using UI;
 
 namespace Roblox.Automation
 {
-    public class GameLauncher
+    public class GameLauncher(AuthenticationService authService, BadgeService badgeService)
     {
-        private readonly AuthenticationService _authService;
-        private readonly BadgeService _badgeService;
-
-        public GameLauncher(AuthenticationService authService, BadgeService badgeService)
-        {
-            _authService = authService ?? throw new ArgumentNullException(nameof(authService));
-            _badgeService = badgeService ?? throw new ArgumentNullException(nameof(badgeService));
-        }
+        private readonly AuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+        private readonly BadgeService _badgeService = badgeService ?? throw new ArgumentNullException(nameof(badgeService));
 
         public async Task LaunchGameForBadgesAsync(Account account, string gameId, int badgeGoal = AppConfig.DefaultBadgeGoal)
         {
             if (string.IsNullOrWhiteSpace(account.Cookie))
             {
-                Console.WriteLine($"[-] Cannot GetBadges for {account.Username}: Missing Cookie.");
+                ConsoleUI.WriteErrorLine($"Cannot GetBadges for {account.Username}: Missing Cookie.");
                 return;
             }
-            Console.WriteLine($"[*] Refreshing XCSRF for {account.Username} before getting auth ticket...");
+            ConsoleUI.WriteInfoLine($"Refreshing XCSRF for {account.Username} before getting auth ticket...");
             bool tokenRefreshed = await _authService.RefreshXCSRFTokenIfNeededAsync(account);
             if (!tokenRefreshed || string.IsNullOrEmpty(account.XcsrfToken))
             {
-                Console.WriteLine($"[-] Failed to refresh XCSRF token for {account.Username}. Cannot proceed with game launch.");
+                ConsoleUI.WriteErrorLine($"Failed to refresh XCSRF token for {account.Username}. Cannot proceed with game launch.");
                 return;
             }
 
-            Console.WriteLine($"[*] Action: GetBadges Target: {account.Username} Game: {gameId} (Goal: {badgeGoal})");
+            ConsoleUI.WriteInfoLine($"Action: GetBadges Target: {account.Username} Game: {gameId} (Goal: {badgeGoal})");
 
             if (!Environment.UserInteractive)
             {
-                Console.WriteLine($"[!] Skipping GetBadges action in non-interactive environment.");
+                ConsoleUI.WriteErrorLine($"Skipping GetBadges action in non-interactive environment.");
                 return;
             }
 
@@ -51,7 +41,7 @@ namespace Roblox.Automation
 
             if (string.IsNullOrEmpty(authTicket))
             {
-                Console.WriteLine($"[-] Auth ticket is missing or invalid. Cannot launch game.");
+                ConsoleUI.WriteErrorLine($"Auth ticket is missing or invalid. Cannot launch game.");
                 return;
             }
 
@@ -72,54 +62,54 @@ namespace Roblox.Automation
 
             try
             {
-                Console.WriteLine($"[*] Dispatching launch command for Roblox Player...");
+                ConsoleUI.WriteInfoLine($"Dispatching launch command for Roblox Player...");
                 Console.WriteLine($"   URL: {ConsoleUI.Truncate(launchUrl, 150)}");
                 Process.Start(new ProcessStartInfo(launchUrl) { UseShellExecute = true });
-                Console.WriteLine($"[+] Launch command sent. The Roblox Player should start shortly.");
-                Console.WriteLine($"[!] Please complete any actions required in the game to earn badges (aiming for {badgeGoal}).");
+                ConsoleUI.WriteSuccessLine($"Launch command sent. The Roblox Player should start shortly.");
+                ConsoleUI.WriteErrorLine($"Please complete any actions required in the game to earn badges (aiming for {badgeGoal}).");
                 await Task.Delay(2000);
             }
-            catch (System.ComponentModel.Win32Exception ex)
+            catch (Win32Exception ex)
             {
-                Console.WriteLine($"[!] Failed to launch Roblox Player. Is Roblox installed and the protocol handler registered?");
-                Console.WriteLine($"[!] Error: {ex.Message} (Code: {ex.NativeErrorCode})");
+                ConsoleUI.WriteErrorLine($"Failed to launch Roblox Player. Is Roblox installed and the protocol handler registered?");
+                ConsoleUI.WriteErrorLine($"Error: {ex.Message} (Code: {ex.NativeErrorCode})");
                 if (ex.NativeErrorCode == 2)
-                    Console.WriteLine($"[?] Hint: Try reinstalling Roblox or running it once manually.");
+                    ConsoleUI.WriteWarningLine($"Hint: Try reinstalling Roblox or running it once manually.");
                 return;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[!] An unexpected error occurred launching Roblox Player for {account.Username}.");
-                Console.WriteLine($"[!] Error: {ex.Message}");
+                ConsoleUI.WriteErrorLine($"An unexpected error occurred launching Roblox Player for {account.Username}.");
+                ConsoleUI.WriteErrorLine($"Error: {ex.Message}");
                 return;
             }
 
             await _badgeService.MonitorBadgeAcquisitionAsync(account, badgeGoal);
             await TerminateRobloxProcessesAsync(account);
 
-            Console.WriteLine($"[*] GetBadges action sequence finished for {account.Username}.");
+            ConsoleUI.WriteInfoLine($"GetBadges action sequence finished for {account.Username}.");
         }
 
-        private async Task TerminateRobloxProcessesAsync(Account account)
+        private static async Task TerminateRobloxProcessesAsync(Account account)
         {
             if (!Environment.UserInteractive)
             {
-                Console.WriteLine("[*] Skipping automatic termination of Roblox processes in non-interactive mode.");
+                ConsoleUI.WriteInfoLine("Skipping automatic termination of Roblox processes in non-interactive mode.");
                 return;
             }
 
-            Console.WriteLine($"[*] Attempting automatic termination of Roblox Player instances...");
+            ConsoleUI.WriteInfoLine($"Attempting automatic termination of Roblox Player instances...");
             int closedCount = 0;
             try
             {
                 string[] processNames = { "RobloxPlayerBeta", "RobloxPlayerLauncher", "RobloxPlayer" };
-                List<Process> robloxProcesses = new List<Process>();
+                List<Process> robloxProcesses = [];
 
                 foreach (var name in processNames)
                 {
                     try { robloxProcesses.AddRange(Process.GetProcessesByName(name)); }
                     catch (InvalidOperationException) { }
-                    catch (Exception ex) { Console.WriteLine($"[!] Error getting process list for '{name}': {ex.Message}"); }
+                    catch (Exception ex) { ConsoleUI.WriteErrorLine($"Error getting process list for '{name}': {ex.Message}"); }
                 }
 
                 robloxProcesses = robloxProcesses.Where(p =>
@@ -162,10 +152,10 @@ namespace Roblox.Automation
                             process.Dispose();
                         }
                     }
-                    Console.WriteLine($"[*] Attempted termination for {closedCount} process(es).");
+                    ConsoleUI.WriteInfoLine($"Attempted termination for {closedCount} process(es).");
                 }
             }
-            catch (Exception ex) { Console.WriteLine($"[!] Error finding/killing Roblox processes: {ex.Message}"); }
+            catch (Exception ex) { ConsoleUI.WriteErrorLine($"Error finding/killing Roblox processes: {ex.Message}"); }
         }
     }
 }

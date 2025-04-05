@@ -37,7 +37,7 @@ namespace Actions
 
         private static AvatarDetails? _targetAvatarDetailsCache;
         private static long _targetAvatarCacheSourceId = -1;
-        private static readonly object _avatarCacheLock = new object();
+        private static readonly Lock _avatarCacheLock = new();
 
         public AccountActionExecutor(
             AccountManager accountManager,
@@ -71,7 +71,7 @@ namespace Actions
                 }
             }
 
-            Console.WriteLine($"[*] Fetching target avatar details from User ID {sourceUserId} for comparison/cache...");
+            ConsoleUI.WriteInfoLine($"Fetching target avatar details from User ID {sourceUserId} for comparison/cache...");
             var fetchedDetails = await _avatarService.FetchAvatarDetailsAsync(sourceUserId);
 
             if (fetchedDetails != null)
@@ -80,13 +80,13 @@ namespace Actions
                 {
                     _targetAvatarDetailsCache = fetchedDetails;
                     _targetAvatarCacheSourceId = sourceUserId;
-                    Console.WriteLine($"[+] Target avatar details cached successfully for {sourceUserId}.");
+                    ConsoleUI.WriteSuccessLine($"Target avatar details cached successfully for {sourceUserId}.");
                 }
                 return fetchedDetails;
             }
             else
             {
-                Console.WriteLine($"[!] Failed to fetch target avatar details for comparison ({sourceUserId}). Cannot perform pre-check.");
+                ConsoleUI.WriteErrorLine($"Failed to fetch target avatar details for comparison ({sourceUserId}). Cannot perform pre-check.");
                 lock (_avatarCacheLock) { _targetAvatarDetailsCache = null; _targetAvatarCacheSourceId = -1; }
                 return null;
             }
@@ -100,7 +100,7 @@ namespace Actions
         {
             if (requireInteraction && !Environment.UserInteractive)
             {
-                Console.WriteLine($"[!] Skipping interactive action '{actionName}' in non-interactive environment.");
+                ConsoleUI.WriteErrorLine($"Skipping interactive action '{actionName}' in non-interactive environment.");
                 return;
             }
 
@@ -121,12 +121,12 @@ namespace Actions
             }
             if (validCount == 0 && totalSelected > 0)
             {
-                Console.WriteLine($"[!] All selected accounts were skipped due to being invalid or lacking required tokens.");
+                ConsoleUI.WriteErrorLine($"All selected accounts were skipped due to being invalid or lacking required tokens.");
                 return;
             }
             else if (validCount == 0 && totalSelected == 0)
             {
-                Console.WriteLine($"[!] No accounts selected for this action.");
+                ConsoleUI.WriteErrorLine($"No accounts selected for this action.");
                 return;
             }
 
@@ -188,22 +188,22 @@ namespace Actions
                             NullReferenceException _ => "Null Reference Error",
                             _ => $"Runtime Error ({ex.GetType().Name})"
                         };
-                        Console.WriteLine($"   [!] {errorType} during '{actionName}' for {acc.Username}: {ConsoleUI.Truncate(ex.Message)}");
+                        ConsoleUI.WriteErrorLine($"{errorType} during '{actionName}' for {acc.Username}: {ConsoleUI.Truncate(ex.Message)}");
 
                         if (attempt < maxRetries)
                         {
                             if (!acc.IsValid)
                             {
-                                Console.WriteLine($"   [!] Account {acc.Username} marked invalid after error. Stopping retries for this action.");
+                                ConsoleUI.WriteErrorLine($"Account {acc.Username} marked invalid after error. Stopping retries for this action.");
                                 break;
                             }
-                            Console.WriteLine($"   [!] Exception caught during '{actionName}'. Waiting {retryDelayMs}ms before retry (Attempt {attempt + 1}/{maxRetries})...");
+                            ConsoleUI.WriteErrorLine($"Exception caught during '{actionName}'. Waiting {retryDelayMs}ms before retry (Attempt {attempt + 1}/{maxRetries})...");
                             await Task.Delay(retryDelayMs);
                         }
                         else
                         {
-                            Console.WriteLine($"   [!] Exception caught on final attempt ({maxRetries + 1}) for '{actionName}'. Action failed.");
-                            if (!acc.IsValid) { Console.WriteLine($"   [!] Account {acc.Username} was marked invalid during the process."); }
+                            ConsoleUI.WriteErrorLine($"Exception caught on final attempt ({maxRetries + 1}) for '{actionName}'. Action failed.");
+                            if (!acc.IsValid) { ConsoleUI.WriteErrorLine($"Account {acc.Username} was marked invalid during the process."); }
                         }
                     }
                 }
@@ -255,19 +255,21 @@ namespace Actions
                {
                    Console.WriteLine($"   [-] Failed to fetch current display name. Proceeding with set attempt...");
                    bool setResult = await _userService.SetDisplayNameAsync(acc, targetName);
-                   Console.WriteLine(setResult ? "      [+] Display name set successfully (blind attempt)." : "      [-] Display name set failed (blind attempt).");
+                   if (setResult) { ConsoleUI.WriteSuccessLine("Display name set successfully (blind attempt)."); }
+                   else { ConsoleUI.WriteErrorLine("Display name set failed (blind attempt)."); }
                    return (setResult, false);
                }
                else if (string.Equals(currentName, targetName, StringComparison.OrdinalIgnoreCase))
                {
-                   Console.WriteLine($"   [*] Skipping SetDisplayName: Already set to '{targetName}'.");
+                   ConsoleUI.WriteInfoLine($"Skipping SetDisplayName: Already set to '{targetName}'.");
                    return (true, true);
                }
                else
                {
                    Console.WriteLine($"   Current name is '{currentName}'. Attempting update to '{targetName}'...");
                    bool setResult = await _userService.SetDisplayNameAsync(acc, targetName);
-                   Console.WriteLine(setResult ? "      [+] Display name set successfully." : "      [-] Display name set failed.");
+                   if (setResult) { ConsoleUI.WriteSuccessLine("Display name set successfully."); }
+                   else { ConsoleUI.WriteErrorLine("Display name set failed."); }
                    return (setResult, false);
                }
            }, "SetDisplayName");
@@ -278,7 +280,7 @@ namespace Actions
                 long targetUserId = AppConfig.DefaultTargetUserIdForAvatarCopy;
                 if (targetUserId <= 0)
                 {
-                    Console.WriteLine($"   [!] Skipping SetAvatar: No valid DefaultTargetUserIdForAvatarCopy ({targetUserId}) configured.");
+                    ConsoleUI.WriteErrorLine($"Skipping SetAvatar: No valid DefaultTargetUserIdForAvatarCopy ({targetUserId}) configured.");
                     return (false, true);
                 }
                 Console.WriteLine($"   Checking current avatar for {acc.Username} against target {targetUserId}...");
@@ -286,7 +288,7 @@ namespace Actions
                 AvatarDetails? targetAvatarDetails = await GetOrFetchTargetAvatarDetailsAsync(targetUserId);
                 if (targetAvatarDetails == null)
                 {
-                    Console.WriteLine($"   [-] Critical Error: Could not get target avatar details for {targetUserId}. Cannot perform check or set avatar.");
+                    ConsoleUI.WriteErrorLine($"Critical Error: Could not get target avatar details for {targetUserId}. Cannot perform check or set avatar.");
                     return (false, false);
                 }
 
@@ -297,7 +299,8 @@ namespace Actions
                 {
                     Console.WriteLine($"   [-] Failed to fetch current avatar details for {acc.Username}. Proceeding with set attempt...");
                     bool setResult = await _avatarService.SetAvatarAsync(acc, targetUserId);
-                    Console.WriteLine(setResult ? "      [+] Avatar set successfully (blind attempt)." : "      [-] Avatar set failed (blind attempt).");
+                    if (setResult) { ConsoleUI.WriteSuccessLine("Avatar set successfully (blind attempt)."); }
+                    else { ConsoleUI.WriteErrorLine("Avatar set failed (blind attempt)."); }
                     return (setResult, false);
                 }
                 else
@@ -305,14 +308,15 @@ namespace Actions
                     bool match = _avatarService.CompareAvatarDetails(currentAvatarDetails, targetAvatarDetails);
                     if (match)
                     {
-                        Console.WriteLine($"   [*] Skipping SetAvatar: Current avatar already matches target {targetUserId}.");
+                        ConsoleUI.WriteInfoLine($"Skipping SetAvatar: Current avatar already matches target {targetUserId}.");
                         return (true, true);
                     }
                     else
                     {
                         Console.WriteLine($"   Current avatar differs from target. Attempting update...");
                         bool setResult = await _avatarService.SetAvatarAsync(acc, targetUserId);
-                        Console.WriteLine(setResult ? "      [+] Avatar set successfully." : "      [-] Avatar set failed.");
+                        if (setResult) { ConsoleUI.WriteSuccessLine("Avatar set successfully."); }
+                        else { ConsoleUI.WriteErrorLine("Avatar set failed."); }
                         return (setResult, false);
                     }
                 }
@@ -323,13 +327,14 @@ namespace Actions
                 long targetGroupId = AppConfig.DefaultGroupId;
                 if (targetGroupId <= 0)
                 {
-                    Console.WriteLine($"   [!] Skipping JoinGroup: No valid DefaultGroupId ({targetGroupId}) configured.");
+                    ConsoleUI.WriteErrorLine($"Skipping JoinGroup: No valid DefaultGroupId ({targetGroupId}) configured.");
                     return (false, true);
                 }
                 Console.WriteLine($"   Attempting to join group {targetGroupId} for {acc.Username}...");
                 bool success = await _groupService.JoinGroupAsync(acc, targetGroupId);
 
-                Console.WriteLine(success ? "      [+] Join group request sent/processed (Result: OK)." : "      [-] Join group request failed (Result: Error).");
+                if (success) { ConsoleUI.WriteSuccessLine("Join group request sent/processed (Result: OK)."); }
+                else { ConsoleUI.WriteErrorLine("Join group request failed (Result: Error)."); }
                 return (success, false);
             }, "JoinGroup");
 
@@ -345,7 +350,7 @@ namespace Actions
                  }
                  else if (currentBadgeCount >= badgeGoal)
                  {
-                     Console.WriteLine($"   [*] Skipping GetBadges: Account already has {currentBadgeCount} (>= {badgeGoal}) recent badges.");
+                     ConsoleUI.WriteInfoLine($"Skipping GetBadges: Account already has {currentBadgeCount} (>= {badgeGoal}) recent badges.");
                      return (true, true);
                  }
                  else
@@ -356,7 +361,7 @@ namespace Actions
                  Console.WriteLine($"   Attempting to launch game {AppConfig.DefaultBadgeGameId}...");
                  await _gameLauncher.LaunchGameForBadgesAsync(acc, AppConfig.DefaultBadgeGameId, badgeGoal);
 
-                 Console.WriteLine($"      [+] Game launch sequence initiated/completed for {acc.Username}.");
+                 ConsoleUI.WriteSuccessLine($"Game launch sequence initiated/completed for {acc.Username}.");
                  return (true, false);
 
              }, $"GetBadges (Goal: {badgeGoal})", requireInteraction: true);
@@ -365,39 +370,38 @@ namespace Actions
            PerformActionOnSelectedAsync(async acc =>
            {
                Console.WriteLine($"   Initiating browser session for {acc.Username}...");
-               var driver = _webDriverManager.StartBrowserWithCookie(acc, AppConfig.HomePageUrl, headless: false);
+               var driver = WebDriverManager.StartBrowserWithCookie(acc, AppConfig.HomePageUrl, headless: false);
 
                if (driver == null)
                {
-                   Console.WriteLine($"   [-] Failed to launch browser session.");
+                   ConsoleUI.WriteErrorLine($"Failed to launch browser session.");
                    return (false, false);
                }
                else
                {
-                   Console.WriteLine($"   [+] Browser session initiated for {acc.Username}. Close the browser window manually when done.");
+                   ConsoleUI.WriteSuccessLine($"Browser session initiated for {acc.Username}. Close the browser window manually when done.");
                    await Task.CompletedTask;
                    return (true, false);
                }
            }, "OpenInBrowser", requireInteraction: true, requireValidToken: false);
-
 
         public async Task HandleLimitedFriendRequestsAsync()
         {
             List<Account> selectedAccountsRaw = _accountManager.GetSelectedAccounts();
             int friendGoal = AppConfig.DefaultFriendGoal;
 
-            Console.WriteLine($"\n[*] Executing Action: Limited Friend Actions (Goal: >= {friendGoal} friends)");
+            ConsoleUI.WriteInfoLine($"Executing Action: Limited Friend Actions (Goal: >= {friendGoal} friends)");
 
             if (selectedAccountsRaw.Count < 2)
             {
-                Console.WriteLine("[!] Need at least 2 selected accounts for this action. Aborting.");
+                ConsoleUI.WriteErrorLine("Need at least 2 selected accounts for this action. Aborting.");
                 return;
             }
 
-            Console.WriteLine($"[*] Phase 0: Pre-checking XCSRF and Friend Counts for {selectedAccountsRaw.Count} selected accounts...");
+            ConsoleUI.WriteInfoLine($"Phase 0: Pre-checking XCSRF and Friend Counts for {selectedAccountsRaw.Count} selected accounts...");
 
-            List<Account> selectedValidAccounts = new List<Account>();
-            List<Account> accountsNeedingFriends = new List<Account>();
+            List<Account> selectedValidAccounts = [];
+            List<Account> accountsNeedingFriends = [];
             int preCheckFailures = 0; int preCheckRefreshed = 0;
             int alreadyMetGoal = 0; int friendCheckErrors = 0;
             Stopwatch preCheckStopwatch = Stopwatch.StartNew();
@@ -466,26 +470,26 @@ namespace Actions
             if (alreadyMetGoal > 0) Console.WriteLine($"   {alreadyMetGoal} valid accounts already met the friend goal ({friendGoal}) and were skipped.");
             Console.WriteLine($"   {accountsNeedingFriends.Count} valid accounts need friends and will proceed.");
 
-            accountsNeedingFriends = accountsNeedingFriends.OrderBy(a => a.UserId).ToList();
+            accountsNeedingFriends = [.. accountsNeedingFriends.OrderBy(a => a.UserId)];
             int count = accountsNeedingFriends.Count;
 
             if (count < 2)
             {
-                Console.WriteLine($"[!] Need at least 2 valid accounts *below the friend goal* for limited friend actions. Found {count}. Aborting friend cycle.");
+                ConsoleUI.WriteErrorLine($"Need at least 2 valid accounts *below the friend goal* for limited friend actions. Found {count}. Aborting friend cycle.");
                 return;
             }
 
             if (count > 15 && !Environment.UserInteractive)
             {
-                Console.WriteLine($"[!] Warning: Running limited friends for a large number ({count}) of accounts non-interactively.");
-                Console.WriteLine($"   This may take a very long time and is prone to rate limits or captchas.");
+                ConsoleUI.WriteErrorLine($"Warning: Running limited friends for a large number ({count}) of accounts non-interactively.");
+                ConsoleUI.WriteErrorLine($"This may take a very long time and is prone to rate limits or captchas.");
             }
             else if (count > 15)
             {
-                Console.WriteLine($"[*] Note: Running limited friends for a larger number ({count}) of accounts. This might take some time.");
+                ConsoleUI.WriteInfoLine($"Note: Running limited friends for a larger number ({count}) of accounts. This might take some time.");
             }
 
-            Console.WriteLine($"\n[*] Phase 1: Sending Friend Requests among {count} accounts needing friends...");
+            ConsoleUI.WriteInfoLine($"Phase 1: Sending Friend Requests among {count} accounts needing friends...");
             int attemptedSends = 0, successSends = 0, failedSends = 0;
             bool canProceedToPhase2 = false;
             var stopwatchSend = Stopwatch.StartNew();
@@ -592,18 +596,18 @@ namespace Actions
 
             if (!canProceedToPhase2)
             {
-                Console.WriteLine("\n[!] No friend requests were successfully sent OR detected as potentially pending in Phase 1. Skipping Phase 2.");
+                ConsoleUI.WriteErrorLine("\nNo friend requests were successfully sent OR detected as potentially pending in Phase 1. Skipping Phase 2.");
                 return;
             }
             else if (successSends == 0 && canProceedToPhase2)
             {
-                Console.WriteLine("\n[*] No *new* friend requests sent successfully, but proceeding to Phase 2 as existing/pending requests might be acceptable.");
+                ConsoleUI.WriteInfoLine("\nNo *new* friend requests sent successfully, but proceeding to Phase 2 as existing/pending requests might be acceptable.");
             }
 
-            Console.WriteLine($"\n[*] Waiting {AppConfig.DefaultRequestTimeoutSec} seconds before starting Phase 2 (Accepting Requests)...");
-            await Task.Delay(AppConfig.DefaultRequestTimeoutSec);
+            ConsoleUI.WriteInfoLine($"\nWaiting {AppConfig.DefaultRequestTimeoutSec} seconds before starting Phase 2 (Accepting Requests)...");
+            await Task.Delay(TimeSpan.FromSeconds(AppConfig.DefaultRequestTimeoutSec));
 
-            Console.WriteLine($"\n[*] Phase 2: Attempting to blindly accept expected friend requests...");
+            ConsoleUI.WriteInfoLine($"\nPhase 2: Attempting to blindly accept expected friend requests...");
             int attemptedAccepts = 0;
             int successAccepts = 0;
             int failedAcceptsPhase2 = 0;
@@ -689,8 +693,8 @@ namespace Actions
             Console.WriteLine($"\n[*] Phase 2 Complete: Attempted Blind Accepts.");
             Console.WriteLine($"   Attempted Accepts (Expected Pairs): {attemptedAccepts}, Successful API Accepts: {successAccepts} ({acceptedPairs.Count} unique pairs confirmed), Failed API Accepts/Errors: {failedAcceptsPhase2}, Skipped (Pre-checks/Invalid): {skippedAccepts}");
             Console.WriteLine($"   Time: {stopwatchAccept.ElapsedMilliseconds}ms ({stopwatchAccept.Elapsed.TotalSeconds:F1}s)");
-            Console.WriteLine($"[*] Limited friend action cycle finished for accounts needing friends.");
-            Console.WriteLine($"   Reminder: Check accounts with Verify action to confirm final friend counts.");
+            ConsoleUI.WriteInfoLine($"Limited friend action cycle finished for accounts needing friends.");
+            ConsoleUI.WriteInfoLine($"Reminder: Check accounts with Verify action to confirm final friend counts.");
         }
 
         private async Task<AcceptAttemptResult> TryAcceptRequestAsync(
@@ -762,7 +766,7 @@ namespace Actions
             Console.WriteLine($"\n[>>] Executing Action: Verify Account Status for {validCount} valid account(s)...");
             Console.WriteLine($"   Requirements: Friends >= {requiredFriends}, Badges >= {requiredBadges} (Recent), Name == '{expectedDisplayName}', Avatar Source == {expectedAvatarSourceId}");
             if (skippedInvalidCount > 0) Console.WriteLine($"   ({skippedInvalidCount} selected accounts were invalid and will be skipped)");
-            if (validCount == 0) { Console.WriteLine($"[!] No valid accounts selected for verification."); return false; }
+            if (validCount == 0) { ConsoleUI.WriteErrorLine($"No valid accounts selected for verification."); return false; }
 
             AvatarDetails? targetAvatarDetails = null;
             if (expectedAvatarSourceId > 0)
@@ -770,10 +774,10 @@ namespace Actions
                 targetAvatarDetails = await GetOrFetchTargetAvatarDetailsAsync(expectedAvatarSourceId);
                 if (targetAvatarDetails == null)
                 {
-                    Console.WriteLine($"[!] Warning: Could not fetch target avatar details for ID {expectedAvatarSourceId}. Avatar check will be skipped for all accounts.");
+                    ConsoleUI.WriteWarningLine($"Could not fetch target avatar details for ID {expectedAvatarSourceId}. Avatar check will be skipped for all accounts.");
                 }
             }
-            else { Console.WriteLine("[*] Skipping avatar check: No target avatar source ID specified (or <= 0)."); }
+            else { ConsoleUI.WriteInfoLine("Skipping avatar check: No target avatar source ID specified (or <= 0)."); }
 
             int passedCount = 0, failedReqCount = 0, failedErrCount = 0;
             var stopwatch = Stopwatch.StartNew();
@@ -788,7 +792,7 @@ namespace Actions
                 AvatarDetails? currentAvatarDetails = null;
                 bool errorOccurred = false;
                 VerificationStatus currentStatus = VerificationStatus.NotChecked;
-                List<string> failureReasons = new List<string>();
+                List<string> failureReasons = [];
 
                 try
                 {
@@ -868,7 +872,7 @@ namespace Actions
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[!] Runtime Error during verification for {acc.Username}: {ex.GetType().Name} - {ex.Message}");
+                    ConsoleUI.WriteErrorLine($"Runtime Error during verification for {acc.Username}: {ex.GetType().Name} - {ex.Message}");
                     currentStatus = VerificationStatus.Error;
                     failureReasons.Add($"Runtime Error: {ex.GetType().Name}");
                     failedErrCount++;
@@ -894,7 +898,7 @@ namespace Actions
 
         public async Task ExecuteAllAutoAsync()
         {
-            Console.WriteLine($"\n[*] Executing Action: Execute All Auto (Uses Defaults)");
+            ConsoleUI.WriteInfoLine($"Executing Action: Execute All Auto (Uses Defaults)");
             Console.WriteLine($"   Sequence: Set Name -> Set Avatar -> Limited Friends -> Get Badges (if interactive/configured)");
             Console.WriteLine($"   Defaults: Name='{AppConfig.DefaultDisplayName}', AvatarSrc={AppConfig.DefaultTargetUserIdForAvatarCopy}, FriendGoal={AppConfig.DefaultFriendGoal}, BadgeGoal={AppConfig.DefaultBadgeGoal}, BadgeGame={AppConfig.DefaultBadgeGameId}");
             Console.WriteLine($"   (Actions will be skipped per-account if prerequisites are already met)");
@@ -910,18 +914,18 @@ namespace Actions
             await HandleLimitedFriendRequestsAsync();
 
             Console.WriteLine("\n--- Starting: Get Badges ---");
-            
+
             if (!Environment.UserInteractive)
             {
-                Console.WriteLine("[!] Skipping 'Get Badges' step in non-interactive environment for 'Execute All Auto'.");
+                ConsoleUI.WriteErrorLine("Skipping 'Get Badges' step in non-interactive environment for 'Execute All Auto'.");
             }
             else
             {
                 await GetBadgesOnSelectedAsync(AppConfig.DefaultBadgeGoal);
             }
 
-            Console.WriteLine($"\n[*] Multi-Action Sequence 'Execute All Auto' Complete.");
-            Console.WriteLine($"[*] Suggestion: Run 'Verify Account Status' (Action 7) to check final state.");
+            ConsoleUI.WriteInfoLine("\nMulti-Action Sequence 'Execute All Auto' Complete.");
+            ConsoleUI.WriteInfoLine("Suggestion: Run 'Verify Account Status' (Action 7) to check final state.");
         }
     }
 }

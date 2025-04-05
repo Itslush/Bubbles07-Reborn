@@ -3,11 +3,11 @@
     public static class AppConfig
     {
         public const int DefaultApiDelayMs = 2500;
-        public const int DefaultFriendActionDelayMs = 9000;
+        public const int DefaultFriendActionDelayMs = 10000;
         public const int SafeApiDelayMs = 6000;
         public const int SafeFriendActionDelayMs = 6000;
         public const int MinAllowedDelayMs = 500;
-        public const int XcsrfRetryDelayMs = 2000;
+        public const int XcsrfRetryDelayMs = 5000;
         public const int RateLimitRetryDelayMs = 15000;
 
         public const int DefaultMaxApiRetries = 3;

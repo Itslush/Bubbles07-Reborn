@@ -3,36 +3,24 @@ using Newtonsoft.Json;
 using Models;
 using Roblox.Http;
 using _Csharpified;
-using System;
-using System.Net.Http;
-using System.Threading.Tasks;
-using System.Threading;
 using UI;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net;
 
 namespace Roblox.Services
 {
-    public class BadgeService
+    public class BadgeService(RobloxHttpClient robloxHttpClient)
     {
-        private readonly RobloxHttpClient _robloxHttpClient;
-
-        public BadgeService(RobloxHttpClient robloxHttpClient)
-        {
-            _robloxHttpClient = robloxHttpClient ?? throw new ArgumentNullException(nameof(robloxHttpClient));
-        }
+        private readonly RobloxHttpClient _robloxHttpClient = robloxHttpClient ?? throw new ArgumentNullException(nameof(robloxHttpClient));
 
         public async Task<int> GetBadgeCountAsync(Account account, int limit = 10)
         {
             if (account == null)
             {
-                Console.WriteLine($"[-] Cannot GetBadgeCount: Account object is null.");
+                ConsoleUI.WriteErrorLine($"Cannot GetBadgeCount: Account object is null.");
                 return -1;
             }
             if (account.UserId <= 0)
             {
-                Console.WriteLine($"[-] Cannot GetBadgeCount: Invalid User ID ({account.UserId}) in Account object.");
+                ConsoleUI.WriteErrorLine($"Cannot GetBadgeCount: Invalid User ID ({account.UserId}) in Account object.");
                 return -1;
             }
 
@@ -40,7 +28,7 @@ namespace Roblox.Services
 
             string url = $"{AppConfig.RobloxApiBaseUrl_Badges}/v1/users/{account.UserId}/badges?limit={limit}&sortOrder=Desc";
 
-            var (_, success, content) = await _robloxHttpClient.SendRequestAndReadAsync(
+            var (statusCode, success, content) = await _robloxHttpClient.SendRequestAndReadAsync(
                 HttpMethod.Get,
                 url,
                 account,
@@ -61,42 +49,45 @@ namespace Roblox.Services
                     }
                     else
                     {
-                        Console.WriteLine($"[-] Could not parse badge count (missing or invalid 'data' array) from response for {account.Username}: {ConsoleUI.Truncate(content)}");
+                        ConsoleUI.WriteErrorLine($"Could not parse badge count (missing or invalid 'data' array) from response for {account.Username}: {ConsoleUI.Truncate(content)}");
                     }
                 }
                 catch (JsonReaderException jex)
                 {
-                    Console.WriteLine($"[-] Error parsing badge count JSON for {account.Username}: {jex.Message}");
+                    ConsoleUI.WriteErrorLine($"Error parsing badge count JSON for {account.Username}: {jex.Message}");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[-] Error processing badge count response for {account.Username}: {ex.Message}");
+                    ConsoleUI.WriteErrorLine($"Error processing badge count response for {account.Username}: {ex.Message}");
                 }
             }
-            else if (!success) { }
+            else if (!success)
+            {
+            }
             else
             {
-                Console.WriteLine($"[-] Get Badge Count request succeeded but returned empty content for {account.Username}.");
+                ConsoleUI.WriteWarningLine($"Get Badge Count request succeeded but returned empty content for {account.Username}.");
             }
 
             return -1;
         }
 
+
         public async Task MonitorBadgeAcquisitionAsync(Account account, int badgeGoal = AppConfig.DefaultBadgeGoal)
         {
             if (account == null)
             {
-                Console.WriteLine($"[-] Cannot MonitorBadgeAcquisition: Account object is null.");
+                ConsoleUI.WriteErrorLine($"Cannot MonitorBadgeAcquisition: Account object is null.");
                 return;
             }
             if (!Environment.UserInteractive)
             {
-                Console.WriteLine("[!] Skipping badge monitoring in non-interactive environment.");
+                ConsoleUI.WriteWarningLine("Skipping badge monitoring in non-interactive environment.");
                 return;
             }
             if (badgeGoal <= 0)
             {
-                Console.WriteLine($"[*] Skipping badge monitoring: Badge goal ({badgeGoal}) is not positive.");
+                ConsoleUI.WriteInfoLine($"Skipping badge monitoring: Badge goal ({badgeGoal}) is not positive.");
                 return;
             }
 
@@ -105,7 +96,7 @@ namespace Roblox.Services
             const int checkIntervalSeconds = 6;
             int initialBadgeCount = -1;
 
-            Console.WriteLine($"[*] Monitoring badge acquisition for {account.Username} (Goal: {badgeGoal})...");
+            ConsoleUI.WriteInfoLine($"Monitoring badge acquisition for {account.Username} (Goal: {badgeGoal})...");
             Console.WriteLine($"    Checking every {checkIntervalSeconds}s up to {maxChecks} times (~{maxChecks * checkIntervalSeconds}s total).");
             Console.WriteLine($"    Press Enter in console to stop monitoring early.");
 
@@ -116,7 +107,7 @@ namespace Roblox.Services
                 Console.WriteLine($" Initial recent badges found: {initialBadgeCount}");
                 if (initialBadgeCount >= badgeGoal)
                 {
-                    Console.WriteLine($"[*] Goal already met or exceeded ({initialBadgeCount} >= {badgeGoal}). Monitoring finished early.");
+                    ConsoleUI.WriteSuccessLine($"Goal already met or exceeded ({initialBadgeCount} >= {badgeGoal}). Monitoring finished early.");
                     return;
                 }
             }
@@ -151,14 +142,11 @@ namespace Roblox.Services
                             Console.WriteLine($"\n[!] User pressed Enter. Aborting monitor.");
                             try { if (!cts.IsCancellationRequested) cts.Cancel(); } catch (ObjectDisposedException) { }
                         }
-                        else
-                        {
-                        }
                     }
                 }
                 catch (InvalidOperationException) { }
                 catch (TaskCanceledException) { }
-                catch (Exception ex) { Console.WriteLine($"\n[!] Error in key listener: {ex.Message}"); }
+                catch (Exception ex) { ConsoleUI.WriteErrorLine($"\nError in key listener: {ex.Message}"); }
                 finally
                 {
                     try { if (!cts.IsCancellationRequested) cts.Cancel(); }
@@ -198,12 +186,12 @@ namespace Roblox.Services
                         }
                         else if (initialBadgeCount != -1 && currentBadgeCount < initialBadgeCount)
                         {
-                            Console.WriteLine($"    [?] Count decreased? ({initialBadgeCount} -> {currentBadgeCount}). API might show badges differently over time.");
+                            ConsoleUI.WriteWarningLine($"Count decreased? ({initialBadgeCount} -> {currentBadgeCount}). API might show badges differently over time.");
                             initialBadgeCount = currentBadgeCount;
                         }
                         if (currentBadgeCount >= badgeGoal)
                         {
-                            Console.WriteLine($"[*] Badge goal ({badgeGoal}) met or exceeded ({currentBadgeCount}). Stopping monitor.");
+                            ConsoleUI.WriteSuccessLine($"Badge goal ({badgeGoal}) met or exceeded ({currentBadgeCount}). Stopping monitor.");
                             stopWaitingFlag = true;
                             try { if (!cts.IsCancellationRequested) cts.Cancel(); } catch (ObjectDisposedException) { }
                         }
@@ -215,7 +203,7 @@ namespace Roblox.Services
                 }
                 catch (Exception ex) when (!(ex is OperationCanceledException))
                 {
-                    Console.WriteLine($" Unexpected Check Error: {ex.GetType().Name} - {ConsoleUI.Truncate(ex.Message)}");
+                    ConsoleUI.WriteErrorLine($"Unexpected Check Error: {ex.GetType().Name} - {ConsoleUI.Truncate(ex.Message)}");
                 }
             }
 
@@ -226,8 +214,9 @@ namespace Roblox.Services
             try { cts.Dispose(); } catch { }
 
             if (stopWaitingFlag && !keyListener.IsCompleted) { }
-            else if (checkCount >= maxChecks) { Console.WriteLine($"[!] Max badge checks ({maxChecks}) reached for {account.Username}. Monitoring finished."); }
-            else if (cts.IsCancellationRequested) { }
+            else if (checkCount >= maxChecks) { ConsoleUI.WriteWarningLine($"Max badge checks ({maxChecks}) reached for {account.Username}. Monitoring finished."); }
+            else if (cts.IsCancellationRequested && !stopWaitingFlag) { }
+
 
             await Task.Delay(500);
             Console.Write("[>] Performing final badge count check...");

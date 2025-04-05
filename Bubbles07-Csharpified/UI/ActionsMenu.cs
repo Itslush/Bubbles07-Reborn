@@ -1,22 +1,13 @@
 ﻿using _Csharpified;
 using Actions;
 using Core;
-using System;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace UI
 {
-    public class ActionsMenu
+    public class ActionsMenu(AccountManager accountManager, AccountActionExecutor actionExecutor)
     {
-        private readonly AccountManager _accountManager;
-        private readonly AccountActionExecutor _actionExecutor;
-
-        public ActionsMenu(AccountManager accountManager, AccountActionExecutor actionExecutor)
-        {
-            _accountManager = accountManager ?? throw new ArgumentNullException(nameof(accountManager));
-            _actionExecutor = actionExecutor ?? throw new ArgumentNullException(nameof(actionExecutor));
-        }
+        private readonly AccountManager _accountManager = accountManager ?? throw new ArgumentNullException(nameof(accountManager));
+        private readonly AccountActionExecutor _actionExecutor = actionExecutor ?? throw new ArgumentNullException(nameof(actionExecutor));
 
         public async Task Show()
         {
@@ -33,7 +24,7 @@ namespace UI
 
                 if (totalSelectedCount == 0)
                 {
-                    ConsoleUI.WriteLineInsideBox("(No accounts selected - Use Main Menu Option 4)");
+                    ConsoleUI.WriteLineInsideBox("(No accounts selected - Use Main Menu Option 5)");
                 }
                 else if (invalidSelectedCount > 0)
                 {
@@ -61,7 +52,7 @@ namespace UI
 
                 if (totalSelectedCount == 0 && choice != "0")
                 {
-                    ConsoleUI.WriteErrorLine("No accounts selected. Please select accounts first (Main Menu Option 4).");
+                    ConsoleUI.WriteErrorLine("No accounts selected. Please select accounts first (Main Menu Option 5).");
                     await Task.Delay(1500);
                     continue;
                 }
@@ -81,15 +72,22 @@ namespace UI
                             Console.Write($"[?] Enter target badge count needed (default: {AppConfig.DefaultBadgeGoal}): ");
                             string? badgeInput = Console.ReadLine();
                             int badgeGoal = AppConfig.DefaultBadgeGoal;
-                            if (!string.IsNullOrWhiteSpace(badgeInput) && int.TryParse(badgeInput, out int parsedBadgeGoal) && parsedBadgeGoal >= 0)
+
+                            if (!string.IsNullOrWhiteSpace(badgeInput))
                             {
-                                badgeGoal = parsedBadgeGoal;
+                                if (int.TryParse(badgeInput, out int parsedBadgeGoal) && parsedBadgeGoal >= 0)
+                                {
+                                    badgeGoal = parsedBadgeGoal;
+                                }
+                                else
+                                {
+                                    ConsoleUI.WriteWarningLine($"Invalid input. Using default badge goal ({badgeGoal}).");
+                                }
                             }
-                            else if (!string.IsNullOrWhiteSpace(badgeInput))
+                            else
                             {
-                                Console.WriteLine($"[!] Invalid input. Using default badge goal ({badgeGoal}).");
+                                ConsoleUI.WriteInfoLine($"Using default badge goal ({badgeGoal}).");
                             }
-                            else { Console.WriteLine($"[*] Using default badge goal ({badgeGoal})."); }
                             await _actionExecutor.GetBadgesOnSelectedAsync(badgeGoal);
                         }
                         break;
@@ -113,7 +111,7 @@ namespace UI
                             string expectedDisplayName = AppConfig.DefaultDisplayName;
                             long expectedAvatarSource = AppConfig.DefaultTargetUserIdForAvatarCopy;
 
-                            Console.WriteLine($"[*] Running Verification Check with Config Defaults:");
+                            ConsoleUI.WriteInfoLine($"Running Verification Check with Config Defaults:");
                             Console.WriteLine($"    Friends >= {requiredFriends}, Badges >= {requiredBadges}");
                             Console.WriteLine($"    Name == '{expectedDisplayName}', Avatar Source == {expectedAvatarSource}");
 
@@ -131,7 +129,7 @@ namespace UI
                             }
                             else
                             {
-                                Console.WriteLine($"\n[*] Verification complete. No failures detected based on requirements.");
+                                ConsoleUI.WriteInfoLine($"\nVerification complete. No failures detected based on requirements.");
                             }
                         }
                         break;
@@ -139,6 +137,7 @@ namespace UI
                     case "0": back = true; break;
                     default: ConsoleUI.WriteErrorLine("Invalid choice."); break;
                 }
+
                 if (!back)
                 {
                     Console.WriteLine("\nAction complete. Press Enter to return to Actions Menu...");
@@ -147,6 +146,7 @@ namespace UI
             }
             Console.Clear();
         }
+
 
         private static int GetIntInput(string prompt, int defaultValue, int? minValue = null, int? maxValue = null)
         {
@@ -189,7 +189,7 @@ namespace UI
 
             ConsoleUI.WriteLineInsideBox($"1. General API Delay (Between accounts/steps):");
             ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentApiDelayMs}ms / Default: {AppConfig.DefaultApiDelayMs}ms");
-            int newApiDelay = GetIntInput($"[?] New delay (ms) or blank: ", AppConfig.CurrentApiDelayMs, AppConfig.MinAllowedDelayMs);
+            int newApiDelay = GetIntInput($"[?] New delay (ms, >= {AppConfig.MinAllowedDelayMs}) or blank: ", AppConfig.CurrentApiDelayMs, AppConfig.MinAllowedDelayMs);
             if (newApiDelay != AppConfig.CurrentApiDelayMs)
             {
                 AppConfig.CurrentApiDelayMs = newApiDelay;
@@ -199,7 +199,7 @@ namespace UI
 
             ConsoleUI.WriteLineInsideBox($"\n2. Friend Action Delay (Send/Accept):");
             ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentFriendActionDelayMs}ms / Default: {AppConfig.DefaultFriendActionDelayMs}ms");
-            int newFriendDelay = GetIntInput($"[?] New delay (ms) or blank: ", AppConfig.CurrentFriendActionDelayMs, AppConfig.MinAllowedDelayMs);
+            int newFriendDelay = GetIntInput($"[?] New delay (ms, >= {AppConfig.MinAllowedDelayMs}) or blank: ", AppConfig.CurrentFriendActionDelayMs, AppConfig.MinAllowedDelayMs);
             if (newFriendDelay != AppConfig.CurrentFriendActionDelayMs)
             {
                 AppConfig.CurrentFriendActionDelayMs = newFriendDelay;
@@ -229,7 +229,7 @@ namespace UI
 
             ConsoleUI.WriteLineInsideBox($"\n5. Action Retry Delay (Wait between retries):");
             ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentApiRetryDelayMs}ms / Default: {AppConfig.DefaultApiRetryDelayMs}ms");
-            int newRetryDelay = GetIntInput($"[?] New retry delay (ms) or blank: ", AppConfig.CurrentApiRetryDelayMs, AppConfig.MinRetryDelayMs);
+            int newRetryDelay = GetIntInput($"[?] New retry delay (ms, >= {AppConfig.MinRetryDelayMs}) or blank: ", AppConfig.CurrentApiRetryDelayMs, AppConfig.MinRetryDelayMs);
             if (newRetryDelay != AppConfig.CurrentApiRetryDelayMs)
             {
                 AppConfig.CurrentApiRetryDelayMs = newRetryDelay;

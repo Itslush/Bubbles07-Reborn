@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace UI
+﻿namespace UI
 {
     public static class ConsoleUI
     {
@@ -45,7 +43,6 @@ namespace UI
                 return value[..maxLength] + "...";
             }
         }
-
         public static void WriteLineInsideBox(string message) => Console.WriteLine($"{T_Vertical}   {message}");
 
         public static void WriteErrorLine(string message)

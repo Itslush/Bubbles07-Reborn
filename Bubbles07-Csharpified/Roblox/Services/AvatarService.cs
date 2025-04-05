@@ -4,12 +4,6 @@ using System.Text;
 using Models;
 using Roblox.Http;
 using _Csharpified;
-using System;
-using System.Net.Http;
-using System.Threading.Tasks;
-using System.Linq;
-using System.Collections.Generic;
-using System.Threading;
 using UI;
 
 namespace Roblox.Services
@@ -27,7 +21,7 @@ namespace Roblox.Services
         {
             if (userId <= 0)
             {
-                Console.WriteLine("[-] Cannot fetch avatar details: Invalid User ID provided.");
+                ConsoleUI.WriteErrorLine("Cannot fetch avatar details: Invalid User ID provided.");
                 return null;
             }
 
@@ -46,33 +40,40 @@ namespace Roblox.Services
 
                 if (response.IsSuccessStatusCode)
                 {
-                    avatarData = JObject.Parse(jsonString);
+                    try
+                    {
+                        avatarData = JObject.Parse(jsonString);
+                    }
+                    catch (JsonReaderException jex)
+                    {
+                        ConsoleUI.WriteErrorLine($"Error parsing avatar details JSON for {userId}: {jex.Message}. Response: {ConsoleUI.Truncate(jsonString)}");
+                        return null;
+                    }
                 }
                 else
                 {
                     if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
                     {
-                        Console.WriteLine($"[-] Failed to fetch avatar details for {userId}: 404 Not Found (User may not exist?).");
+                        ConsoleUI.WriteErrorLine($"Failed to fetch avatar details for {userId}: 404 Not Found (User may not exist?).");
                     }
                     else if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
                     {
-                        Console.WriteLine($"[-] Failed to fetch avatar details for {userId}: 400 Bad Request. Details: {ConsoleUI.Truncate(jsonString)}");
+                        ConsoleUI.WriteErrorLine($"Failed to fetch avatar details for {userId}: 400 Bad Request. Details: {ConsoleUI.Truncate(jsonString)}");
                     }
                     else if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
                     {
-                        Console.WriteLine($"[-] Failed to fetch avatar details for {userId}: 429 Too Many Requests. Check delays.");
+                        ConsoleUI.WriteErrorLine($"Failed to fetch avatar details for {userId}: 429 Too Many Requests. Check delays.");
                     }
                     else
                     {
-                        Console.WriteLine($"[-] Failed to fetch avatar details for {userId}: {(int)response.StatusCode} {response.ReasonPhrase}. Details: {ConsoleUI.Truncate(jsonString)}");
+                        ConsoleUI.WriteErrorLine($"Failed to fetch avatar details for {userId}: {(int)response.StatusCode} {response.ReasonPhrase}. Details: {ConsoleUI.Truncate(jsonString)}");
                     }
                     return null;
                 }
             }
-            catch (OperationCanceledException) { Console.WriteLine($"[!] Timeout fetching avatar details for {userId}."); return null; }
-            catch (JsonReaderException jex) { Console.WriteLine($"[!] Error parsing avatar details JSON for {userId}: {jex.Message}."); return null; }
-            catch (HttpRequestException hrex) { Console.WriteLine($"[!] Network error fetching avatar details for {userId}: {hrex.Message}"); return null; }
-            catch (Exception ex) { Console.WriteLine($"[!] Exception fetching avatar details for {userId}: {ex.GetType().Name} - {ex.Message}"); return null; }
+            catch (OperationCanceledException) { ConsoleUI.WriteErrorLine($"Timeout fetching avatar details for {userId}."); return null; }
+            catch (HttpRequestException hrex) { ConsoleUI.WriteErrorLine($"Network error fetching avatar details for {userId}: {hrex.Message}"); return null; }
+            catch (Exception ex) { ConsoleUI.WriteErrorLine($"Exception fetching avatar details for {userId}: {ex.GetType().Name} - {ex.Message}"); return null; }
             finally { response?.Dispose(); }
 
 
@@ -97,7 +98,7 @@ namespace Roblox.Services
 
                 if (details.BodyColors == null || details.PlayerAvatarType == null || details.Scales == null || details.AssetIds == null)
                 {
-                    Console.WriteLine($"[!] Warning: Fetched avatar data for {userId} was incomplete (missing fields: bodyColors, playerAvatarType, scales, or assets). Content: {ConsoleUI.Truncate(avatarData.ToString())}");
+                    ConsoleUI.WriteWarningLine($"Fetched avatar data for {userId} was incomplete (missing fields: bodyColors, playerAvatarType, scales, or assets). Content: {ConsoleUI.Truncate(avatarData.ToString())}");
                     return null;
                 }
 
@@ -105,34 +106,34 @@ namespace Roblox.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[!] Error processing fetched avatar JSON data for {userId}: {ex.Message}");
+                ConsoleUI.WriteErrorLine($"Error processing fetched avatar JSON data for {userId}: {ex.Message}");
                 return null;
             }
         }
 
         public async Task<bool> SetAvatarAsync(Account account, long sourceUserId)
         {
-            if (account == null) { Console.WriteLine("[-] Cannot SetAvatar: Account is null."); return false; }
+            if (account == null) { ConsoleUI.WriteErrorLine("Cannot SetAvatar: Account is null."); return false; }
             if (string.IsNullOrEmpty(account.XcsrfToken))
             {
-                Console.WriteLine($"[-] Cannot SetAvatar for {account.Username}: Missing XCSRF token.");
+                ConsoleUI.WriteErrorLine($"Cannot SetAvatar for {account.Username}: Missing XCSRF token.");
                 return false;
             }
-            if (sourceUserId <= 0) { Console.WriteLine("[-] Cannot SetAvatar: Invalid Source User ID."); return false; }
+            if (sourceUserId <= 0) { ConsoleUI.WriteErrorLine("Cannot SetAvatar: Invalid Source User ID."); return false; }
 
-            Console.WriteLine($"[*] Action: SetAvatar Source: {sourceUserId} Target: {account.Username}");
+            ConsoleUI.WriteInfoLine($"Action: SetAvatar Source: {sourceUserId} Target: {account.Username}");
 
             AvatarDetails? targetAvatarDetails = await FetchAvatarDetailsAsync(sourceUserId);
 
             if (targetAvatarDetails == null)
             {
-                Console.WriteLine($"[-] Failed to get source avatar details from {sourceUserId}. Cannot proceed.");
+                ConsoleUI.WriteErrorLine($"Failed to get source avatar details from {sourceUserId}. Cannot proceed.");
                 return false;
             }
 
             if (targetAvatarDetails.AssetIds == null || targetAvatarDetails.BodyColors == null || targetAvatarDetails.PlayerAvatarType == null || targetAvatarDetails.Scales == null)
             {
-                Console.WriteLine($"[-] Source avatar data fetched from {sourceUserId} is incomplete. Cannot apply.");
+                ConsoleUI.WriteErrorLine($"Source avatar data fetched from {sourceUserId} is incomplete. Cannot apply.");
                 return false;
             }
 
@@ -152,7 +153,7 @@ namespace Roblox.Services
                     stepSuccess = await stepAction();
                     if (!stepSuccess)
                     {
-                        Console.WriteLine($"   [-] Step Failed: {description} for {account.Username}.");
+                        ConsoleUI.WriteErrorLine($"Step Failed: {description} for {account.Username}.");
                         overallSuccess = false;
                     }
                     else
@@ -161,7 +162,7 @@ namespace Roblox.Services
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"   [-] UNEXPECTED ERROR applying {description} for {account.Username}: {ex.GetType().Name} - {ex.Message}");
+                    ConsoleUI.WriteErrorLine($"UNEXPECTED ERROR applying {description} for {account.Username}: {ex.GetType().Name} - {ex.Message}");
                     stepSuccess = false;
                     overallSuccess = false;
                 }
@@ -172,6 +173,7 @@ namespace Roblox.Services
                 }
                 else
                 {
+                    await Task.Delay(AppConfig.CurrentApiDelayMs / 2);
                 }
 
                 return stepSuccess;
@@ -214,7 +216,8 @@ namespace Roblox.Services
                 return await _robloxHttpClient.SendRequestAsync(HttpMethod.Post, url, account, content, "Redraw Thumbnail (Final Step)");
             }, "Redraw Thumbnail"))
             {
-                Console.WriteLine($"[*] Warning: Avatar settings applied, but final thumbnail redraw failed for {account.Username}.");
+                ConsoleUI.WriteWarningLine($"Avatar settings applied, but final thumbnail redraw failed for {account.Username}.");
+                overallSuccess = true;
             }
 
             return overallSuccess;

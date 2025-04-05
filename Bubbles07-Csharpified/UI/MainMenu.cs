@@ -1,24 +1,12 @@
-﻿using _Csharpified;
-using Core;
+﻿using Core;
 using Models;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using UI;
 
 namespace UI
 {
-    public class MainMenu
+    public class MainMenu(AccountManager accountManager, ActionsMenu actionsMenu)
     {
-        private readonly AccountManager _accountManager;
-        private readonly ActionsMenu _actionsMenu;
-
-        public MainMenu(AccountManager accountManager, ActionsMenu actionsMenu)
-        {
-            _accountManager = accountManager ?? throw new ArgumentNullException(nameof(accountManager));
-            _actionsMenu = actionsMenu ?? throw new ArgumentNullException(nameof(actionsMenu));
-        }
+        private readonly AccountManager _accountManager = accountManager ?? throw new ArgumentNullException(nameof(accountManager));
+        private readonly ActionsMenu _actionsMenu = actionsMenu ?? throw new ArgumentNullException(nameof(actionsMenu));
 
         public async Task Show()
         {
@@ -37,15 +25,17 @@ namespace UI
                 ConsoleUI.WriteLineInsideBox($"Currently Selected: {selectedCount}");
                 ConsoleUI.WriteLineInsideBox("");
 
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"1. Add Account (Single Cookie)"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"2. Import Cookies (Bulk Paste)"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"3. List Accounts (Show Roster)"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"4. Select / Deselect Accounts"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"5. Show Selected Accounts"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"6. Show Accounts with Full Cookies"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"7. Actions Menu (Execute Tasks on Selected)"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"8. Adjust Rate Limits, Timeout & Retries"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_End, $"0. Exit"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $" 1. Add Account (Single Cookie)"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $" 2. Import Cookies from File (.txt)"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $" 3. Import Cookies (Bulk Paste)"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $" 4. List Accounts (Show Roster)"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $" 5. Select / Deselect Accounts"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $" 6. Show Selected Accounts"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $" 7. Show Accounts with Full Cookies"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $" 8. Actions Menu (Execute Tasks on Selected)"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $" 9. Adjust Rate Limits, Timeout & Retries"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"10. Export Cookies & Usernames to File"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_End, $" 0. Exit"));
 
                 ConsoleUI.PrintMenuFooter();
                 string? choice = Console.ReadLine();
@@ -58,46 +48,61 @@ namespace UI
                         break;
                     case "2":
                         Console.Clear();
-                        await ImportCookiesFromInputUI();
+                        await ImportCookiesFromFileUI();
                         break;
                     case "3":
                         Console.Clear();
-                        ListAccountsUI();
+                        await ImportCookiesFromInputUI();
                         break;
                     case "4":
                         Console.Clear();
-                        SelectAccountsUI();
+                        ListAccountsUI();
                         break;
                     case "5":
                         Console.Clear();
-                        ShowSelectedAccountsUI();
+                        SelectAccountsUI();
                         break;
                     case "6":
                         Console.Clear();
-                        ShowAccountsWithCookiesUI();
+                        ShowSelectedAccountsUI();
                         break;
                     case "7":
-                        if (selectedCount == 0) { ConsoleUI.WriteErrorLine("No accounts selected. Use option 4 first."); }
-                        else { await _actionsMenu.Show(); }
+                        Console.Clear();
+                        ShowAccountsWithCookiesUI();
                         break;
                     case "8":
+                        if (selectedCount == 0)
+                        {
+                            ConsoleUI.WriteErrorLine("No accounts selected. Use option 5 first.");
+                        }
+                        else
+                        {
+                            await _actionsMenu.Show();
+                        }
+                        break;
+                    case "9":
                         ActionsMenu.AdjustRateLimitsUI();
                         break;
+                    case "10":
+                        Console.Clear();
+                        await ExportAccountsToFileUI();
+                        break;
                     case "0":
-                        Console.WriteLine("[*] Exiting application...");
+                        ConsoleUI.WriteInfoLine("Exiting application...");
                         exit = true;
                         break;
-                    default: ConsoleUI.WriteErrorLine("Invalid choice. Please enter a number from the menu."); break;
+                    default:
+                        ConsoleUI.WriteErrorLine("Invalid choice. Please enter a number from the menu.");
+                        break;
                 }
 
-                if (!exit && choice != "7" && choice != "8")
+                if (!exit && choice != "8" && choice != "9")
                 {
                     Console.WriteLine("\nPress Enter to return to the Main Menu...");
                     Console.ReadLine();
                 }
             }
         }
-
         private async Task AddAccountUI()
         {
             ConsoleUI.PrintMenuTitle("Add Single Account");
@@ -112,14 +117,12 @@ namespace UI
                 bool added = await _accountManager.AddAccountAsync(cookie);
                 if (added)
                 {
-                    ConsoleUI.WriteSuccessLine("Account processed. Check roster (Option 3).");
                     var addedAcc = _accountManager.GetAllAccounts().LastOrDefault(a => a.Cookie == cookie);
                     if (addedAcc != null)
                     {
-                        ConsoleUI.WriteInfoLine($"Added: {addedAcc}");
+                        ConsoleUI.WriteInfoLine($"Processed: {addedAcc}");
                     }
                 }
-                else { ConsoleUI.WriteErrorLine("Failed to add account (duplicate or invalid - see messages above)."); }
             }
             else
             {
@@ -128,9 +131,29 @@ namespace UI
             Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
         }
 
+        private async Task ImportCookiesFromFileUI()
+        {
+            ConsoleUI.PrintMenuTitle("Import Cookies from File");
+            ConsoleUI.WriteLineInsideBox("Enter the full path to the text file containing cookies.");
+            ConsoleUI.WriteLineInsideBox("The file should have one cookie per line.");
+            ConsoleUI.WriteLineInsideBox("Example: C:\\Users\\YourUser\\Desktop\\cookies.txt");
+            Console.Write($"{ConsoleUI.T_Vertical}   File Path: ");
+            string? filePath = Console.ReadLine()?.Trim();
+
+            if (!string.IsNullOrWhiteSpace(filePath))
+            {
+                await _accountManager.ImportAccountsFromFileAsync(filePath);
+            }
+            else
+            {
+                ConsoleUI.WriteErrorLine("File path cannot be empty. Aborting.");
+            }
+            Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
+        }
+
         private async Task ImportCookiesFromInputUI()
         {
-            ConsoleUI.PrintMenuTitle("Import Cookies");
+            ConsoleUI.PrintMenuTitle("Import Cookies (Bulk Paste)");
             ConsoleUI.WriteLineInsideBox("Paste one cookie per line below. Format: _|WARNING:-...");
             ConsoleUI.WriteLineInsideBox("Press Enter on an empty line when finished.");
             ConsoleUI.WriteLineInsideBox("");
@@ -150,12 +173,12 @@ namespace UI
                     }
                     else
                     {
-                        Console.WriteLine($"{ConsoleUI.T_Vertical}   [!] Skipping line {lineNum - 1}: Duplicate cookie in this input batch.");
+                        ConsoleUI.WriteErrorLine($"Skipping line {lineNum - 1}: Duplicate cookie in this input batch.");
                     }
                 }
                 else if (!string.IsNullOrEmpty(trimmedCookie))
                 {
-                    Console.WriteLine($"{ConsoleUI.T_Vertical}   [!] Skipping line {lineNum - 1}: Invalid format ({ConsoleUI.Truncate(trimmedCookie, 15)}...)");
+                    ConsoleUI.WriteErrorLine($"Skipping line {lineNum - 1}: Invalid format ({ConsoleUI.Truncate(trimmedCookie, 15)}...)");
                 }
                 Console.Write($"{ConsoleUI.T_Vertical}   [{lineNum++,3}] >>> ");
             }
@@ -179,7 +202,7 @@ namespace UI
 
             if (accounts.Count == 0)
             {
-                ConsoleUI.WriteLineInsideBox("No accounts loaded. Use option 1 or 2 to add accounts.");
+                ConsoleUI.WriteLineInsideBox("No accounts loaded. Use option 1, 2 or 3 to add accounts.");
                 if (showFooter) Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 40) + ConsoleUI.T_BottomRight);
                 return;
             }
@@ -203,9 +226,46 @@ namespace UI
             ConsoleUI.WriteLineInsideBox("--------------------------------------------------");
             if (showFooter)
             {
-                ConsoleUI.WriteLineInsideBox($"Use option 4 to select/deselect accounts.");
+                ConsoleUI.WriteLineInsideBox($"Use option 5 to select/deselect accounts.");
                 Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
             }
+        }
+
+        private void ShowSelectedAccountsUI(bool showFooter = true)
+        {
+            var selectedIndices = _accountManager.GetSelectedAccountIndices();
+            var allAccounts = _accountManager.GetAllAccounts();
+
+            ConsoleUI.WriteInfoLine($"--- Currently Selected ({selectedIndices.Count}) ---");
+
+            if (selectedIndices.Count == 0)
+            {
+                ConsoleUI.WriteLineInsideBox("None selected.");
+                if (showFooter) Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 40) + ConsoleUI.T_BottomRight);
+                return;
+            }
+
+            foreach (int index in selectedIndices.OrderBy(i => i))
+            {
+                if (index >= 0 && index < allAccounts.Count)
+                {
+                    var account = allAccounts[index];
+                    var status = _accountManager.GetVerificationStatus(account.UserId);
+                    string statusMarker = status switch
+                    {
+                        VerificationStatus.Passed => "(PASS)",
+                        VerificationStatus.Failed => "(FAIL)",
+                        VerificationStatus.Error => "(ERR)",
+                        _ => ""
+                    };
+                    ConsoleUI.WriteLineInsideBox($" {index + 1,3}: {account} {statusMarker}");
+                }
+                else
+                {
+                    ConsoleUI.WriteErrorLine($"Internal Error: Selected index {index} is out of bounds!");
+                }
+            }
+            if (showFooter) Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
         }
 
 
@@ -229,10 +289,12 @@ namespace UI
             {
                 ConsoleUI.WriteLineInsideBox($"{i + 1,3}: {accounts[i]}");
                 ConsoleUI.WriteLineInsideBox($"      Cookie: {accounts[i].Cookie}");
+                if (i < accounts.Count - 1) ConsoleUI.WriteLineInsideBox("");
             }
             ConsoleUI.WriteLineInsideBox("--------------------------------------------------");
             Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
         }
+
 
         private void SelectAccountsUI()
         {
@@ -300,42 +362,44 @@ namespace UI
                     ConsoleUI.WriteErrorLine("Unrecognized command or invalid input. Selection unchanged.");
                 }
             }
+
             Console.WriteLine();
             ShowSelectedAccountsUI(showFooter: true);
         }
 
-        private void ShowSelectedAccountsUI(bool showFooter = true)
+        private async Task ExportAccountsToFileUI()
         {
-            var selectedIndices = _accountManager.GetSelectedAccountIndices();
-            var allAccounts = _accountManager.GetAllAccounts();
+            ConsoleUI.PrintMenuTitle("Export Cookies & Usernames");
 
-            ConsoleUI.WriteInfoLine($"--- Currently Selected ({selectedIndices.Count}) ---");
-
-            if (selectedIndices.Count == 0)
+            if (_accountManager.GetAllAccounts().Count == 0)
             {
-                ConsoleUI.WriteLineInsideBox("None selected.");
-                if (showFooter) Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 40) + ConsoleUI.T_BottomRight);
+                ConsoleUI.WriteErrorLine("No accounts are loaded to export.");
+                Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
                 return;
             }
 
-            foreach (int index in selectedIndices.OrderBy(i => i))
+            ConsoleUI.WriteLineInsideBox("Enter the desired filename for the export.");
+            ConsoleUI.WriteLineInsideBox("Example: exported_accounts.txt");
+            Console.Write($"{ConsoleUI.T_Vertical}   Filename (or press Enter for 'cookies_export.txt'): ");
+            string? fileName = Console.ReadLine()?.Trim();
+
+            if (string.IsNullOrWhiteSpace(fileName))
             {
-                if (index >= 0 && index < allAccounts.Count)
-                {
-                    var account = allAccounts[index];
-                    var status = _accountManager.GetVerificationStatus(account.UserId);
-                    string statusMarker = status switch
-                    {
-                        VerificationStatus.Passed => "(PASS)",
-                        VerificationStatus.Failed => "(FAIL)",
-                        VerificationStatus.Error => "(ERR)",
-                        _ => ""
-                    };
-                    ConsoleUI.WriteLineInsideBox($" {index + 1,3}: {account} {statusMarker}");
-                }
-                else { ConsoleUI.WriteErrorLine($"Error: Selected index {index} is out of bounds!"); }
+                fileName = "cookies_export.txt";
+                ConsoleUI.WriteInfoLine($"Using default filename: {fileName}");
             }
-            if (showFooter) Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
+
+            if (fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            {
+                ConsoleUI.WriteErrorLine($"Filename '{fileName}' contains invalid characters. Aborting.");
+                Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
+                return;
+            }
+
+            ConsoleUI.WriteInfoLine($"Attempting to export to '{fileName}'...");
+            _ = await _accountManager.ExportAccountsToFileAsync(fileName);
+
+            Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
         }
     }
 }
