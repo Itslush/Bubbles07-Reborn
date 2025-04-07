@@ -1,29 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Text;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Models;
-using Roblox.Services;
-using UI;
-using System.Text;
+using Continuance.Models;
+using Continuance.Roblox.Services;
+using Continuance.UI;
 
-namespace Core
+namespace Continuance.Core
 {
-    public class AccountManager
+    public class AccountManager(AuthenticationService authService)
     {
         private readonly List<Account> _accounts = [];
         private readonly List<int> _selectedAccountIndices = [];
         private readonly Dictionary<long, (VerificationStatus Status, string Details)> _verificationResults = new Dictionary<long, (VerificationStatus, string)>();
-        private readonly AuthenticationService _authService;
+        private readonly AuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));
         private readonly Lock _lock = new();
-
-        public AccountManager(AuthenticationService authService)
-        {
-            _authService = authService ?? throw new ArgumentNullException(nameof(authService));
-        }
 
         public IReadOnlyList<Account> GetAllAccounts()
         {
@@ -203,48 +192,67 @@ namespace Core
             int successCount = 0, duplicateCount = 0, invalidCount = 0, fetchFailCount = 0;
             var stopwatch = Stopwatch.StartNew();
             var tasks = new List<Task>();
+            int processedCount = 0;
 
             int maxConcurrency = 5;
             using (var semaphore = new SemaphoreSlim(maxConcurrency))
             {
-                for (int i = 0; i < cookiesToImport.Count; i++)
+                foreach (string cookie in cookiesToImport)
                 {
                     await semaphore.WaitAsync();
-                    int currentIndex = i;
-                    string cookie = cookiesToImport[currentIndex];
+                    string currentCookie = cookie;
 
                     tasks.Add(Task.Run(async () =>
                     {
+                        string resultMessage = "";
+                        string truncatedCookie = ConsoleUI.Truncate(currentCookie, 20) + "...";
+                        bool addedSuccessfully = false;
+                        string finalUsername = "N/A";
+                        bool isDuplicate = false;
+                        bool isValidCookie = false;
+                        bool xcsrfFailed = false;
+
                         try
                         {
-                            Console.WriteLine($"[{currentIndex + 1}/{cookiesToImport.Count}] Processing {ConsoleUI.Truncate(cookie, 20)}... ");
                             bool alreadyExists;
-                            lock (_lock) { alreadyExists = _accounts.Any(a => a.Cookie == cookie); }
-                            if (alreadyExists) { Console.WriteLine($"Duplicate (in roster)."); Interlocked.Increment(ref duplicateCount); return; }
+                            lock (_lock) { alreadyExists = _accounts.Any(a => a.Cookie == currentCookie); }
+                            if (alreadyExists) { resultMessage = $"Duplicate (already in roster)."; isDuplicate = true; return; }
 
-                            var (isValid, userId, username) = await _authService.ValidateCookieAsync(cookie);
+                            var (isValid, userId, username) = await _authService.ValidateCookieAsync(currentCookie);
                             if (isValid && userId > 0)
                             {
-                                string xcsrfRaw = await AuthenticationService.FetchXCSRFTokenAsync(cookie);
+                                finalUsername = username ?? "N/A";
+                                isValidCookie = true;
+                                string xcsrfRaw = await AuthenticationService.FetchXCSRFTokenAsync(currentCookie);
                                 string xcsrf = xcsrfRaw?.Trim() ?? "";
-                                var newAccount = new Account { Cookie = cookie, UserId = userId, Username = username, XcsrfToken = xcsrf, IsValid = !string.IsNullOrEmpty(xcsrf) };
+                                var newAccount = new Account { Cookie = currentCookie, UserId = userId, Username = finalUsername, XcsrfToken = xcsrf, IsValid = !string.IsNullOrEmpty(xcsrf) };
 
                                 lock (_lock)
                                 {
                                     if (!_accounts.Any(a => a.Cookie == newAccount.Cookie))
                                     {
                                         _accounts.Add(newAccount);
-                                        if (newAccount.IsValid) { Interlocked.Increment(ref successCount); Console.WriteLine($"OK ({username})"); }
-                                        else { Interlocked.Increment(ref fetchFailCount); Console.WriteLine($"XCSRF Fail ({username})"); }
+                                        if (newAccount.IsValid) { Interlocked.Increment(ref successCount); resultMessage = $"OK ({finalUsername})"; addedSuccessfully = true; }
+                                        else { Interlocked.Increment(ref fetchFailCount); resultMessage = $"XCSRF Fail ({finalUsername})"; xcsrfFailed = true; }
                                     }
-                                    else { Console.WriteLine($"Duplicate (Race)."); Interlocked.Increment(ref duplicateCount); }
+                                    else { Interlocked.Increment(ref duplicateCount); resultMessage = "Duplicate (Race)"; isDuplicate = true; }
                                 }
                             }
-                            else { Console.WriteLine($"Invalid."); Interlocked.Increment(ref invalidCount); }
+                            else { resultMessage = $"Invalid."; Interlocked.Increment(ref invalidCount); }
                         }
-                        catch (Exception ex) { Console.WriteLine($"Error Processing {ConsoleUI.Truncate(cookie, 20)}: {ex.Message}"); Interlocked.Increment(ref invalidCount); }
-                        finally { semaphore.Release(); }
-                        await Task.Delay(150);
+                        catch (Exception ex) { resultMessage = $"Error: {ex.Message}"; Interlocked.Increment(ref invalidCount); }
+                        finally
+                        {
+                            int currentCount = Interlocked.Increment(ref processedCount);
+                            if (isDuplicate) { ConsoleUI.WriteWarningLine($"[{currentCount}/{cookiesToImport.Count}] Skipped Cookie: {truncatedCookie} - {resultMessage}"); }
+                            else if (addedSuccessfully) { ConsoleUI.WriteSuccessLine($"[{currentCount}/{cookiesToImport.Count}] Added Cookie: {truncatedCookie} - {resultMessage}"); }
+                            else if (xcsrfFailed) { ConsoleUI.WriteErrorLine($"[{currentCount}/{cookiesToImport.Count}] Added (INVALID) Cookie: {truncatedCookie} - {resultMessage}"); }
+                            else if (!isValidCookie) { ConsoleUI.WriteErrorLine($"[{currentCount}/{cookiesToImport.Count}] Invalid Cookie: {truncatedCookie} - {resultMessage}"); }
+                            else { ConsoleUI.WriteErrorLine($"[{currentCount}/{cookiesToImport.Count}] Failed Cookie: {truncatedCookie} - {resultMessage}"); }
+
+                            semaphore.Release();
+                            await Task.Delay(150);
+                        }
                     }));
                 }
                 await Task.WhenAll(tasks);

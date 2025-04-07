@@ -1,12 +1,12 @@
 ﻿using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
 using System.Text;
-using Models;
-using Roblox.Http;
-using _Csharpified;
-using UI;
+using Continuance;
+using Continuance.Models;
+using Continuance.Roblox.Http;
+using Continuance.UI;
 
-namespace Roblox.Services
+namespace Continuance.Roblox.Services
 {
     public class AvatarService
     {
@@ -31,7 +31,7 @@ namespace Roblox.Services
 
             try
             {
-                var externalClient = _robloxHttpClient.GetExternalHttpClient();
+                var externalClient = RobloxHttpClient.ExternalHttpClient;
 
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(AppConfig.DefaultRequestTimeoutSec));
                 response = await externalClient.GetAsync(avatarUrl, cts.Token);
@@ -116,7 +116,7 @@ namespace Roblox.Services
             if (account == null) { ConsoleUI.WriteErrorLine("Cannot SetAvatar: Account is null."); return false; }
             if (string.IsNullOrEmpty(account.XcsrfToken))
             {
-                ConsoleUI.WriteErrorLine($"Cannot SetAvatar for {account.Username}: Missing XCSRF token.");
+                ConsoleUI.WriteWarningLine($"Cannot SetAvatar for {account.Username}: Missing XCSRF token.");
                 return false;
             }
             if (sourceUserId <= 0) { ConsoleUI.WriteErrorLine("Cannot SetAvatar: Invalid Source User ID."); return false; }

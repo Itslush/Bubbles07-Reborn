@@ -1,12 +1,11 @@
 ﻿using Newtonsoft.Json.Linq;
-using Models;
-using _Csharpified;
 using System.Text.RegularExpressions;
 using System.Net;
-using UI;
 using Newtonsoft.Json;
+using Continuance.Models;
+using Continuance.UI;
 
-namespace Roblox.Http
+namespace Continuance.Roblox.Http
 {
     public class RobloxHttpClient
     {
@@ -22,9 +21,9 @@ namespace Roblox.Http
             UseCookies = false,
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
         });
-        public HttpClient GetExternalHttpClient() => externalHttpClient;
+        public static HttpClient ExternalHttpClient => externalHttpClient;
 
-        private HttpRequestMessage CreateBaseRequest(HttpMethod method, string url, Account account, HttpContent? content = null)
+        private static HttpRequestMessage CreateBaseRequest(HttpMethod method, string url, Account account, HttpContent? content = null)
         {
             if (!Uri.TryCreate(url, UriKind.Absolute, out _))
             {
@@ -84,7 +83,7 @@ namespace Roblox.Http
             }
 
             bool retried = false;
-            retry_request:
+        retry_request:
             HttpResponseMessage? response = null;
 
             try
@@ -112,7 +111,7 @@ namespace Roblox.Http
                 if (!response.IsSuccessStatusCode)
                 {
                     string username = account?.Username ?? "N/A";
-                    Console.WriteLine($"[-] FAILED: {actionDescription} for {username}. Code: {(int)response.StatusCode} ({response.ReasonPhrase}). URL: {ConsoleUI.Truncate(url, 60)}. Data: {ConsoleUI.Truncate(responseContent)}");
+                    ConsoleUI.WriteErrorLine($"[-] FAILED: {actionDescription} for {username}. Code: {(int)response.StatusCode} ({response.ReasonPhrase}). URL: {ConsoleUI.Truncate(url, 60)}. Data: {ConsoleUI.Truncate(responseContent)}");
 
                     if (response.StatusCode == HttpStatusCode.Forbidden &&
                         response.Headers.TryGetValues("X-CSRF-TOKEN", out var csrfHeaderValues) &&
@@ -193,7 +192,6 @@ namespace Roblox.Http
             return isSuccess;
         }
 
-
         public static async Task<(bool IsValid, long UserId, string Username)> ValidateCookieAsync(string cookie)
         {
             if (string.IsNullOrWhiteSpace(cookie)) return (false, 0, "N/A");
@@ -249,7 +247,6 @@ namespace Roblox.Http
             catch (HttpRequestException hrex) { ConsoleUI.WriteErrorLine($"Validation Network Error: {hrex.Message} (StatusCode: {hrex.StatusCode})"); }
             catch (Exception ex) { ConsoleUI.WriteErrorLine($"Validation Exception: {ex.GetType().Name} - {ex.Message}"); }
             finally { response?.Dispose(); }
-
 
             return (false, 0, "N/A");
         }

@@ -1,10 +1,10 @@
 ﻿using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Support.UI;
 using OpenQA.Selenium;
-using Models;
-using UI;
+using Continuance.Models;
+using Continuance.UI;
 
-namespace Roblox.Automation
+namespace Continuance.Roblox.Automation
 {
     public class WebDriverManager
     {

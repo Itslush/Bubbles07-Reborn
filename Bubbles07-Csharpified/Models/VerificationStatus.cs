@@ -1,8 +1,8 @@
-﻿namespace Models
+﻿namespace Continuance.Models
 {
     public enum VerificationStatus
     {
-        NotChecked = 0,
+        NotChecked,
         Passed,
         Failed,
         Error

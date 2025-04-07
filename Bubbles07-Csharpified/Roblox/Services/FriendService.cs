@@ -1,13 +1,13 @@
 ﻿using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
-using Models;
-using Roblox.Http;
-using _Csharpified;
 using System.Text;
-using UI;
 using System.Net;
+using Continuance;
+using Continuance.Models;
+using Continuance.Roblox.Http;
+using Continuance.UI;
 
-namespace Roblox.Services
+namespace Continuance.Roblox.Services
 {
     public class FriendService(RobloxHttpClient robloxHttpClient)
     {
@@ -46,7 +46,7 @@ namespace Roblox.Services
                         if (errorJson["errors"] is JArray errors &&
                             errors.Any(err => err["code"]?.Value<int>() == 5))
                         {
-                            Console.WriteLine($"    -> Send Fail (Code 5: Request likely pending or already friends with {friendUsername}).");
+                            ConsoleUI.WriteWarningLine($"    -> Send Fail (Code 5: Request likely pending or already friends with {friendUsername}).");
                             return (false, true, "Request pending or already friends (Code 5).");
                         }
                     }
@@ -62,7 +62,7 @@ namespace Roblox.Services
             if (account == null) { ConsoleUI.WriteErrorLine($"Cannot AcceptFriendRequest: Account is null."); return false; }
             if (string.IsNullOrEmpty(account.XcsrfToken))
             {
-                ConsoleUI.WriteErrorLine($"Cannot AcceptFriendRequest for {account.Username}: Missing XCSRF token.");
+                ConsoleUI.WriteWarningLine($"Cannot AcceptFriendRequest for {account.Username}: Missing XCSRF token.");
                 return false;
             }
             if (friendUserId <= 0) { ConsoleUI.WriteErrorLine($"Cannot AcceptFriendRequest for {account.Username}: Invalid friend User ID ({friendUserId})."); return false; }

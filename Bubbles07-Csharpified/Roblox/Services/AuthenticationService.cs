@@ -1,9 +1,9 @@
-﻿using Models;
-using Roblox.Http;
-using _Csharpified;
-using UI;
+﻿using Continuance;
+using Continuance.Models;
+using Continuance.Roblox.Http;
+using Continuance.UI;
 
-namespace Roblox.Services
+namespace Continuance.Roblox.Services
 {
     public class AuthenticationService(RobloxHttpClient robloxHttpClient)
     {
@@ -100,7 +100,7 @@ namespace Roblox.Services
             }
             if (string.IsNullOrEmpty(account.XcsrfToken) || string.IsNullOrWhiteSpace(account.Cookie))
             {
-                ConsoleUI.WriteErrorLine($"Cannot Get Auth Ticket for {account.Username}: Missing XCSRF token or Cookie.");
+                ConsoleUI.WriteWarningLine($"Cannot Get Auth Ticket for {account.Username}: Missing XCSRF token or Cookie.");
                 return null;
             }
             if (string.IsNullOrWhiteSpace(gameId) || !long.TryParse(gameId, out _))
@@ -113,7 +113,7 @@ namespace Roblox.Services
             var authContent = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
 
             bool retried = false;
-            retry_auth_request:
+        retry_auth_request:
             HttpResponseMessage? rawAuthResponse = null;
             try
             {

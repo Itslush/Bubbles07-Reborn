@@ -1,12 +1,12 @@
 ﻿using Newtonsoft.Json.Linq;
-using Models;
-using Roblox.Http;
-using _Csharpified;
 using System.Text;
-using UI;
 using Newtonsoft.Json;
+using Continuance;
+using Continuance.Models;
+using Continuance.Roblox.Http;
+using Continuance.UI;
 
-namespace Roblox.Services
+namespace Continuance.Roblox.Services
 {
     public class UserService(RobloxHttpClient robloxHttpClient)
     {
@@ -17,7 +17,7 @@ namespace Roblox.Services
             if (account == null) { ConsoleUI.WriteErrorLine($"Cannot SetDisplayName: Account is null."); return false; }
             if (string.IsNullOrEmpty(account.XcsrfToken))
             {
-                ConsoleUI.WriteErrorLine($"Cannot SetDisplayName for {account.Username}: Missing XCSRF token.");
+                ConsoleUI.WriteWarningLine($"Cannot SetDisplayName for {account.Username}: Missing XCSRF token.");
                 return false;
             }
             if (string.IsNullOrWhiteSpace(newDisplayName) || newDisplayName.Length < 3 || newDisplayName.Length > 20)

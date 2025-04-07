@@ -1,10 +1,10 @@
 ﻿using System.Text;
-using _Csharpified;
-using Models;
-using Roblox.Http;
-using UI;
+using Continuance;
+using Continuance.Models;
+using Continuance.Roblox.Http;
+using Continuance.UI;
 
-namespace Roblox.Services
+namespace Continuance.Roblox.Services
 {
     public class GroupService(RobloxHttpClient robloxHttpClient)
     {
@@ -15,7 +15,7 @@ namespace Roblox.Services
             if (account == null) { ConsoleUI.WriteErrorLine($"Cannot JoinGroup: Account is null."); return false; }
             if (string.IsNullOrEmpty(account.XcsrfToken))
             {
-                ConsoleUI.WriteErrorLine($"Cannot JoinGroup for {account.Username}: Missing XCSRF token.");
+                ConsoleUI.WriteWarningLine($"Cannot JoinGroup for {account.Username}: Missing XCSRF token.");
                 return false;
             }
             if (groupId <= 0) { ConsoleUI.WriteErrorLine($"Cannot JoinGroup for {account.Username}: Invalid Group ID ({groupId})."); return false; }

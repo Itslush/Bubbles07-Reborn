@@ -1,4 +1,4 @@
-﻿namespace UI
+﻿namespace Continuance.UI
 {
     public static class ConsoleUI
     {
@@ -16,9 +16,11 @@
 
         public static void PrintMenuTitle(string title)
         {
-            int width = Math.Max(title.Length + 4, 50);
-            string line = new string(T_HorzBar[0], width);
-            int totalPadding = width - title.Length;
+            _ = Math.Max(title.Length + 4, 50);
+            int width;
+            try { width = Math.Min(Console.WindowWidth - 1, Math.Max(title.Length + 4, 50)); } catch { width = 50; }
+            string line = new(T_HorzBar[0], width - 2);
+            int totalPadding = width - 2 - title.Length;
             int leftPadding = totalPadding / 2;
             int rightPadding = totalPadding - leftPadding;
 
@@ -48,25 +50,25 @@
         public static void WriteErrorLine(string message)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"{T_Vertical}   [!] {message}");
+            Console.WriteLine($"   [!] {message}");
             Console.ResetColor();
         }
         public static void WriteSuccessLine(string message)
         {
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"{T_Vertical}   [+] {message}");
+            Console.WriteLine($"   [+] {message}");
             Console.ResetColor();
         }
         public static void WriteInfoLine(string message)
         {
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($"{T_Vertical}   [*] {message}");
+            Console.WriteLine($"   [*] {message}");
             Console.ResetColor();
         }
         public static void WriteWarningLine(string message)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"{T_Vertical}   [?] {message}");
+            Console.WriteLine($"   [?] {message}");
             Console.ResetColor();
         }
     }

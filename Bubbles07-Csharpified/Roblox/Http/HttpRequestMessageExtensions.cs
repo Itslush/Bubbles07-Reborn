@@ -1,4 +1,4 @@
-﻿namespace Roblox.Http
+﻿namespace Continuance.Roblox.Http
 {
     public static class HttpRequestMessageExtensions
     {
@@ -24,12 +24,12 @@
 
             clone.Version = req.Version;
 
-            #if NET5_0_OR_GREATER
-                foreach (KeyValuePair<string, object?> option in req.Options)
-                {
-                    if (option.Value != null) clone.Options.TryAdd(option.Key, option.Value);
-                }
-            #endif
+#if NET5_0_OR_GREATER
+            foreach (KeyValuePair<string, object?> option in req.Options)
+            {
+                if (option.Value != null) clone.Options.TryAdd(option.Key, option.Value);
+            }
+#endif
 
             foreach (KeyValuePair<string, IEnumerable<string>> header in req.Headers)
             {
