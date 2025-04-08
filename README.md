@@ -8,4 +8,4 @@ The primary purpose of this project is to support *Operation: TCD* by providing 
 
 **Future Goals**
 
-Looking ahead,I'm considering to expand *Continuance* into an alternative to *Roblox Account Manager* developed by [ic3w0lf22](https://github.com/ic3w0lf22) ([RAM](https://github.com/ic3w0lf22/Roblox-Account-Manager)).
+Looking ahead, I'm considering to expand *Continuance* into an alternative to *Roblox Account Manager* developed by [ic3w0lf22](https://github.com/ic3w0lf22) ([RAM](https://github.com/ic3w0lf22/Roblox-Account-Manager)).
