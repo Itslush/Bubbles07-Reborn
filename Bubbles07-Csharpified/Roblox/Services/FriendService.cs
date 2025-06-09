@@ -2,7 +2,6 @@
 using Newtonsoft.Json;
 using System.Text;
 using System.Net;
-using Continuance;
 using Continuance.Models;
 using Continuance.Roblox.Http;
 using Continuance.UI;
@@ -23,7 +22,7 @@ namespace Continuance.Roblox.Services
             string url = $"{AppConfig.RobloxApiBaseUrl_Friends}/v1/users/{friendUserId}/request-friendship";
             var content = new StringContent("{}", Encoding.UTF8, "application/json");
 
-            var (statusCode, isSuccess, responseContent) = await _robloxHttpClient.SendRequestAndReadAsync(
+            var (statusCode, isSuccess, responseContent) = await RobloxHttpClient.SendRequest(
                 HttpMethod.Post,
                 url,
                 account,
@@ -90,7 +89,7 @@ namespace Continuance.Roblox.Services
 
             string url = $"{AppConfig.RobloxApiBaseUrl_Friends}/v1/users/{account.UserId}/friends/count";
 
-            var (statusCode, success, content) = await _robloxHttpClient.SendRequestAndReadAsync(
+            var (statusCode, success, content) = await RobloxHttpClient.SendRequest(
                 HttpMethod.Get,
                 url,
                 account,

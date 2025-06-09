@@ -1,7 +1,6 @@
 ﻿using Newtonsoft.Json.Linq;
 using System.Text;
 using Newtonsoft.Json;
-using Continuance;
 using Continuance.Models;
 using Continuance.Roblox.Http;
 using Continuance.UI;
@@ -15,6 +14,7 @@ namespace Continuance.Roblox.Services
         public async Task<bool> SetDisplayNameAsync(Account account, string newDisplayName)
         {
             if (account == null) { ConsoleUI.WriteErrorLine($"Cannot SetDisplayName: Account is null."); return false; }
+
             if (string.IsNullOrEmpty(account.XcsrfToken))
             {
                 ConsoleUI.WriteWarningLine($"Cannot SetDisplayName for {account.Username}: Missing XCSRF token.");
@@ -49,7 +49,7 @@ namespace Continuance.Roblox.Services
 
             string url = $"{AppConfig.RobloxApiBaseUrl_Users}/v1/users/{account.UserId}";
 
-            var (statusCode, success, content) = await _robloxHttpClient.SendRequestAndReadAsync(
+            var (statusCode, success, content) = await RobloxHttpClient.SendRequest(
                 HttpMethod.Get,
                 url,
                 account,

@@ -1,5 +1,4 @@
-﻿using Continuance;
-using Continuance.Models;
+﻿using Continuance.Models;
 using Continuance.Roblox.Http;
 using Continuance.UI;
 
@@ -8,13 +7,13 @@ namespace Continuance.Roblox.Services
     public class AuthenticationService(RobloxHttpClient robloxHttpClient)
     {
         private readonly RobloxHttpClient _robloxHttpClient = robloxHttpClient ?? throw new ArgumentNullException(nameof(robloxHttpClient));
-        private static readonly HttpClient directHttpClient = new HttpClient(new HttpClientHandler
+        private static readonly HttpClient directHttpClient = new(new HttpClientHandler
         {
             UseCookies = false,
             AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
         });
 
-        public Task<(bool IsValid, long UserId, string Username)> ValidateCookieAsync(string cookie)
+        public static Task<(bool IsValid, long UserId, string Username)> ValidateCookieAsync(string cookie)
         {
             return RobloxHttpClient.ValidateCookieAsync(cookie);
         }
@@ -24,7 +23,7 @@ namespace Continuance.Roblox.Services
             return RobloxHttpClient.FetchXCSRFTokenAsync(cookie);
         }
 
-        public async Task<bool> RefreshXCSRFTokenIfNeededAsync(Account account)
+        public static async Task<bool> RefreshXCSRFTokenIfNeededAsync(Account account)
         {
             if (account == null)
             {
@@ -41,7 +40,7 @@ namespace Continuance.Roblox.Services
 
             string url = $"{AppConfig.RobloxApiBaseUrl_Friends}/v1/users/{account.UserId}/friends/count";
 
-            var (_, success, content) = await _robloxHttpClient.SendRequestAndReadAsync(
+            var (_, success, content) = await RobloxHttpClient.SendRequest(
                 HttpMethod.Get,
                 url,
                 account,
@@ -113,8 +112,9 @@ namespace Continuance.Roblox.Services
             var authContent = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
 
             bool retried = false;
-        retry_auth_request:
+            retry_auth_request:
             HttpResponseMessage? rawAuthResponse = null;
+
             try
             {
                 Console.WriteLine($"[>] Requesting game authentication ticket for {account.Username}...");
@@ -211,6 +211,7 @@ namespace Continuance.Roblox.Services
             catch (HttpRequestException hrex) { ConsoleUI.WriteErrorLine($"Network error getting auth ticket for {account.Username}: {hrex.Message}"); return null; }
             catch (UriFormatException ufex) { ConsoleUI.WriteErrorLine($"URL format error during auth ticket request for {account.Username}: {ufex.Message} (Check GameID/URLs)"); return null; }
             catch (Exception ex) { ConsoleUI.WriteErrorLine($"Exception getting auth ticket for {account.Username}: {ex.GetType().Name} - {ex.Message}"); return null; }
+
             finally { rawAuthResponse?.Dispose(); }
         }
     }

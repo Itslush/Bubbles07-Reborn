@@ -1,7 +1,6 @@
 ﻿using Newtonsoft.Json;
 using Continuance.Models;
 using Continuance.Core;
-using Continuance;
 
 namespace Continuance.UI
 {
@@ -10,7 +9,7 @@ namespace Continuance.UI
         private readonly AccountManager _accountManager = accountManager ?? throw new ArgumentNullException(nameof(accountManager));
         private readonly ActionsMenu _actionsMenu = actionsMenu ?? throw new ArgumentNullException(nameof(actionsMenu));
         private const string SettingsFilePath = "settings.json";
-
+        private static readonly char[] separator = new[] { ' ', ',' };
         public async Task Show()
         {
             bool exit = false;
@@ -258,7 +257,6 @@ namespace Continuance.UI
             int listWidth = 75;
             try { listWidth = Math.Max(75, Console.WindowWidth - 5); } catch { }
 
-
             if (selectedIndices.Count == 0)
             {
                 ConsoleUI.WriteLineInsideBox("None selected.");
@@ -294,7 +292,6 @@ namespace Continuance.UI
             if (showFooter) Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
         }
 
-
         private void ShowAccountsWithCookiesUI()
         {
             ConsoleUI.PrintMenuTitle("Accounts with Full Cookies");
@@ -324,7 +321,6 @@ namespace Continuance.UI
             ConsoleUI.WriteLineInsideBox(new string('-', listWidth));
             Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
         }
-
 
         private void SelectAccountsUI()
         {
@@ -359,7 +355,7 @@ namespace Continuance.UI
             if (!commandProcessed)
             {
                 var indicesToToggle = new List<int>();
-                var parts = input.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var parts = input.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 int invalidCount = 0;
 
                 foreach (var part in parts)
@@ -427,14 +423,75 @@ namespace Continuance.UI
         {
             ConsoleUI.PrintMenuTitle("Export Cookies & Usernames");
 
-            if (_accountManager.GetAllAccounts().Count == 0)
+            var allAccounts = _accountManager.GetAllAccounts();
+
+            if (allAccounts.Count == 0)
             {
                 ConsoleUI.WriteErrorLine("No accounts are loaded to export.");
                 Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
                 return;
             }
 
-            ConsoleUI.WriteLineInsideBox("Enter the desired filename for the export.");
+            ConsoleUI.WriteLineInsideBox("Which accounts do you want to export?");
+            ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, "1. All Loaded Accounts"));
+            ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, "2. Currently Selected Accounts"));
+            ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, "3. Accounts that PASSED Verification"));
+            ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, "4. Accounts that FAILED/ERRORED Verification"));
+            ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, "5. Valid Accounts (Cookie OK, XCSRF OK)"));
+            ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_End, "6. Invalid Accounts (Cookie Bad / XCSRF Failed)"));
+            Console.Write($"{ConsoleUI.T_Vertical}   Choose filter (1-6, default 1): ");
+            string? filterChoice = Console.ReadLine()?.Trim();
+
+            List<Account> accountsToExport;
+            string filterDescription = "All Loaded";
+
+            switch (filterChoice)
+            {
+                case "2":
+                    accountsToExport = _accountManager.GetSelectedAccounts();
+                    filterDescription = "Selected";
+                    break;
+                case "3":
+                    accountsToExport = allAccounts.Where(acc => acc != null && _accountManager.GetVerificationStatus(acc.UserId) == VerificationStatus.Passed).ToList();
+                    filterDescription = "Passed Verification";
+                    break;
+                case "4":
+                    accountsToExport = allAccounts.Where(acc => acc != null &&
+                        (_accountManager.GetVerificationStatus(acc.UserId) == VerificationStatus.Failed ||
+                         _accountManager.GetVerificationStatus(acc.UserId) == VerificationStatus.Error)).ToList();
+                    filterDescription = "Failed/Errored Verification";
+                    break;
+                case "5":
+                    accountsToExport = allAccounts.Where(acc => acc != null && acc.IsValid).ToList();
+                    filterDescription = "Valid (Cookie/XCSRF OK)";
+                    break;
+                case "6":
+                    accountsToExport = allAccounts.Where(acc => acc != null && !acc.IsValid).ToList();
+                    filterDescription = "Invalid (Cookie Bad/XCSRF Fail)";
+                    break;
+                case "1":
+                default:
+                    accountsToExport = allAccounts.ToList();
+                    filterDescription = "All Loaded";
+                    if (filterChoice != "1" && !string.IsNullOrEmpty(filterChoice))
+                    {
+                        ConsoleUI.WriteWarningLine($"Invalid filter choice '{filterChoice}'. Exporting all accounts.");
+                    }
+                    break;
+            }
+
+            if (accountsToExport.Count == 0)
+            {
+                ConsoleUI.WriteErrorLine($"No accounts found matching the filter: '{filterDescription}'. Aborting export.");
+                Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
+                return;
+            }
+            else
+            {
+                ConsoleUI.WriteInfoLine($"Selected filter: '{filterDescription}' ({accountsToExport.Count} account(s))");
+            }
+
+            ConsoleUI.WriteLineInsideBox("\nEnter the desired filename for the export.");
             ConsoleUI.WriteLineInsideBox("Example: exported_accounts.txt");
             Console.Write($"{ConsoleUI.T_Vertical}   Filename (or press Enter for 'cookies_export.txt'): ");
             string? fileName = Console.ReadLine()?.Trim();
@@ -452,8 +509,17 @@ namespace Continuance.UI
                 return;
             }
 
-            ConsoleUI.WriteInfoLine($"Attempting to export to '{fileName}'...");
-            _ = await _accountManager.ExportAccountsToFileAsync(fileName);
+            bool sortUsernames = true;
+            Console.Write($"{ConsoleUI.T_Vertical}   Sort usernames alphabetically in the export file? (y/n, default y): ");
+            string? sortChoice = Console.ReadLine()?.Trim().ToLower();
+            if (sortChoice == "n")
+            {
+                sortUsernames = false;
+            }
+
+            ConsoleUI.WriteInfoLine($"Attempting to export {accountsToExport.Count} account(s) to '{fileName}'...");
+
+            _ = await AccountManager.ExportAccountsToFileAsync(fileName, accountsToExport, sortUsernames);
 
             Console.WriteLine(ConsoleUI.T_BottomLeft + new string(ConsoleUI.T_HorzBar[0], 50) + ConsoleUI.T_BottomRight);
         }

@@ -1,18 +1,13 @@
 ﻿using System.Diagnostics;
 using Newtonsoft.Json;
-using Continuance;
 using Continuance.Core;
 using Continuance.Models;
 using Continuance.Roblox.Automation;
 using Continuance.Roblox.Services;
 using Continuance.UI;
-using Newtonsoft.Json.Linq;
-using System.Net;
-using System.Runtime.Intrinsics.X86;
-using System.Text.RegularExpressions;
+using OpenQA.Selenium;
 
-
-namespace Actions
+namespace Continuance.Actions
 {
     internal enum AcceptAttemptResult
     {
@@ -24,43 +19,30 @@ namespace Actions
         Skipped_SendNotSuccessful
     }
 
-    public class AccountActionExecutor
+    public class AccountActionExecutor(
+        AccountManager accountManager,
+        AuthenticationService authService,
+        UserService userService,
+        AvatarService avatarService,
+        GroupService groupService,
+        FriendService friendService,
+        BadgeService badgeService,
+        WebDriverManager webDriverManager,
+        GameLauncher gameLauncher)
     {
-        private readonly AccountManager _accountManager;
-        private readonly AuthenticationService _authService;
-        private readonly UserService _userService;
-        private readonly AvatarService _avatarService;
-        private readonly GroupService _groupService;
-        private readonly FriendService _friendService;
-        private readonly BadgeService _badgeService;
-        private readonly WebDriverManager _webDriverManager;
-        private readonly GameLauncher _gameLauncher;
+        private readonly AccountManager _accountManager = accountManager ?? throw new ArgumentNullException(nameof(accountManager));
+        private readonly AuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+        private readonly UserService _userService = userService ?? throw new ArgumentNullException(nameof(userService));
+        private readonly AvatarService _avatarService = avatarService ?? throw new ArgumentNullException(nameof(avatarService));
+        private readonly GroupService _groupService = groupService ?? throw new ArgumentNullException(nameof(groupService));
+        private readonly FriendService _friendService = friendService ?? throw new ArgumentNullException(nameof(friendService));
+        private readonly BadgeService _badgeService = badgeService ?? throw new ArgumentNullException(nameof(badgeService));
+        private readonly WebDriverManager _webDriverManager = webDriverManager ?? throw new ArgumentNullException(nameof(webDriverManager));
+        private readonly GameLauncher _gameLauncher = gameLauncher ?? throw new ArgumentNullException(nameof(gameLauncher));
 
         private static AvatarDetails? _targetAvatarDetailsCache;
         private static long _targetAvatarCacheSourceId = -1;
         private static readonly Lock _avatarCacheLock = new();
-
-        public AccountActionExecutor(
-            AccountManager accountManager,
-            AuthenticationService authService,
-            UserService userService,
-            AvatarService avatarService,
-            GroupService groupService,
-            FriendService friendService,
-            BadgeService badgeService,
-            WebDriverManager webDriverManager,
-            GameLauncher gameLauncher)
-        {
-            _accountManager = accountManager ?? throw new ArgumentNullException(nameof(accountManager));
-            _authService = authService ?? throw new ArgumentNullException(nameof(authService));
-            _userService = userService ?? throw new ArgumentNullException(nameof(userService));
-            _avatarService = avatarService ?? throw new ArgumentNullException(nameof(avatarService));
-            _groupService = groupService ?? throw new ArgumentNullException(nameof(groupService));
-            _friendService = friendService ?? throw new ArgumentNullException(nameof(friendService));
-            _badgeService = badgeService ?? throw new ArgumentNullException(nameof(badgeService));
-            _webDriverManager = webDriverManager ?? throw new ArgumentNullException(nameof(webDriverManager));
-            _gameLauncher = gameLauncher ?? throw new ArgumentNullException(nameof(gameLauncher));
-        }
 
         private async Task<AvatarDetails?> GetOrFetchTargetAvatarDetailsAsync(long sourceUserId)
         {
@@ -73,7 +55,7 @@ namespace Actions
             }
 
             Console.WriteLine($"{ConsoleUI.T_Vertical}   [*] Fetching target avatar details from User ID {sourceUserId} for comparison/cache...");
-            var fetchedDetails = await _avatarService.FetchAvatarDetailsAsync(sourceUserId);
+            var fetchedDetails = await AvatarService.FetchAvatarDetailsAsync(sourceUserId);
 
             if (fetchedDetails != null)
             {
@@ -307,7 +289,7 @@ namespace Actions
                 }
 
                 Console.WriteLine($"   Fetching current avatar details for {acc.Username}...");
-                AvatarDetails? currentAvatarDetails = await _avatarService.FetchAvatarDetailsAsync(acc.UserId);
+                AvatarDetails? currentAvatarDetails = await AvatarService.FetchAvatarDetailsAsync(acc.UserId);
 
                 if (currentAvatarDetails == null)
                 {
@@ -319,7 +301,7 @@ namespace Actions
                 }
                 else
                 {
-                    bool match = _avatarService.CompareAvatarDetails(currentAvatarDetails, targetAvatarDetails);
+                    bool match = AvatarService.CompareAvatarDetails(currentAvatarDetails, targetAvatarDetails);
                     if (match)
                     {
                         Console.WriteLine($"{ConsoleUI.T_Vertical}      [*] Skipping SetAvatar: Current avatar already matches target {targetUserId}.");
@@ -336,20 +318,66 @@ namespace Actions
                 }
             }, $"SetAvatar from UserID {targetUserId}");
 
-        public Task JoinGroupOnSelectedAsync(long targetGroupId) =>
-            PerformActionOnSelectedAsync(async acc => {
+        public Task JoinGroupInteractiveOnSelectedAsync(long targetGroupId) =>
+            PerformActionOnSelectedAsync(async acc =>
+            {
                 if (targetGroupId <= 0)
                 {
-                    Console.WriteLine($"{ConsoleUI.T_Vertical}      [!] Skipping JoinGroup: No valid targetGroupId ({targetGroupId}) provided.");
+                    Console.WriteLine($"{ConsoleUI.T_Vertical}      [!] Skipping JoinGroup: Invalid targetGroupId ({targetGroupId}).");
                     return (false, true);
                 }
-                Console.WriteLine($"   Attempting to join group {targetGroupId} for {acc.Username}...");
-                bool success = await _groupService.JoinGroupAsync(acc, targetGroupId);
 
-                if (success) { Console.WriteLine($"{ConsoleUI.T_Vertical}      [+] Join group request sent/processed (Result: OK)."); }
-                else { Console.WriteLine($"{ConsoleUI.T_Vertical}      [!] Join group request failed (Result: Error)."); }
-                return (success, false);
-            }, $"JoinGroup ID {targetGroupId}");
+                string groupUrl = $"{AppConfig.RobloxWebBaseUrl}/groups/{targetGroupId}/about";
+                Console.WriteLine($"   Initiating browser session for {acc.Username} to join Group {targetGroupId}...");
+                Console.WriteLine($"   Target URL: {groupUrl}");
+
+                IWebDriver? driver = null;
+                try
+                {
+                    driver = WebDriverManager.StartBrowserWithCookie(acc, groupUrl, headless: false);
+
+                    if (driver == null)
+                    {
+                        Console.WriteLine($"{ConsoleUI.T_Vertical}      [!] Failed to launch browser session.");
+                        return (false, false);
+                    }
+
+                    Console.WriteLine($"{ConsoleUI.T_Vertical}      [+] Browser opened for {acc.Username}.");
+                    Console.WriteLine($"{ConsoleUI.T_Vertical}          >> Please find the 'Join Group' button on the page.");
+                    Console.WriteLine($"{ConsoleUI.T_Vertical}          >> Click it and solve any CAPTCHA that appears in the browser.");
+                    Console.WriteLine($"{ConsoleUI.T_Vertical}          >> Do NOT close the browser window yourself yet.");
+                    Console.Write($"{ConsoleUI.T_Vertical}          >> Press Enter in THIS console window once done (or to skip): ");
+
+                    await Task.Run(() => Console.ReadLine());
+
+                    Console.WriteLine($"{ConsoleUI.T_Vertical}      [*] User confirmed action completed or skipped in browser.");
+                    return (true, false);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"{ConsoleUI.T_Vertical}      [!] An error occurred during the interactive join group process: {ex.Message}");
+                    return (false, false);
+                }
+                finally
+                {
+                    if (driver != null)
+                    {
+                        Console.WriteLine($"{ConsoleUI.T_Vertical}      [*] Attempting to close browser window for {acc.Username}...");
+                        try
+                        {
+                            driver.Quit();
+                            Console.WriteLine($"{ConsoleUI.T_Vertical}          Browser closed.");
+                        }
+                        catch (Exception closeEx)
+                        {
+                            Console.WriteLine($"{ConsoleUI.T_Vertical}      [?] Non-critical error closing browser: {closeEx.Message}");
+                        }
+                    }
+                }
+            },
+            $"Join Group ID {targetGroupId} (Interactive)",
+            requireInteraction: true,
+            requireValidToken: false);
 
         public Task GetBadgesOnSelectedAsync(int badgeGoal, string gameId) =>
              PerformActionOnSelectedAsync(async acc =>
@@ -373,7 +401,7 @@ namespace Actions
                  else if (badgeGoal <= 50) apiLimitForCheck = 50;
                  else apiLimitForCheck = 100;
 
-                 int currentBadgeCount = await _badgeService.GetBadgeCountAsync(acc, limit: apiLimitForCheck);
+                 int currentBadgeCount = await BadgeService.GetBadgeCountAsync(acc, limit: apiLimitForCheck);
 
                  if (currentBadgeCount == -1)
                  {
@@ -424,7 +452,7 @@ namespace Actions
                }
            }, "OpenInBrowser", requireInteraction: true, requireValidToken: false);
 
-        public async Task HandleLimitedFriendRequestsAsync(int friendGoal)
+        public async Task HandleFriendRequestsAsync(int friendGoal)
         {
             List<Account> selectedAccountsRaw = _accountManager.GetSelectedAccounts();
             var overallStopwatch = Stopwatch.StartNew();
@@ -459,7 +487,7 @@ namespace Actions
                 }
 
                 string oldToken = acc.XcsrfToken;
-                bool tokenOk = await _authService.RefreshXCSRFTokenIfNeededAsync(acc);
+                bool tokenOk = await AuthenticationService.RefreshXCSRFTokenIfNeededAsync(acc);
 
                 if (!tokenOk)
                 {
@@ -505,6 +533,7 @@ namespace Actions
             }
 
             preCheckStopwatch.Stop();
+
             Console.WriteLine($"\n[*] Pre-check Summary (Took {preCheckStopwatch.ElapsedMilliseconds}ms):");
             if (preCheckRefreshed > 0) Console.WriteLine($"   {preCheckRefreshed} tokens were refreshed/initialized.");
             if (preCheckFailures > 0) Console.WriteLine($"   {preCheckFailures} accounts skipped/failed (Invalid state or token issues).");
@@ -535,9 +564,11 @@ namespace Actions
 
             int batchSize = totalNeedingFriends;
             bool useBatching = false;
+
             const int batchPromptThreshold = 20;
             const int defaultBatchSize = 10;
             const int minBatchSize = 5;
+
             int batchDelaySeconds = 60;
 
             if (totalNeedingFriends >= batchPromptThreshold)
@@ -725,7 +756,8 @@ namespace Actions
                 }
                 else
                 {
-                    const int phase2DelaySeconds = 75; // Increased fixed delay
+                    const int phase2DelaySeconds = 75;
+
                     Console.WriteLine($"{ConsoleUI.T_Vertical}      [*] Batch {batchNum + 1}: Phase 1 Sends complete. Waiting {phase2DelaySeconds} seconds before starting Phase 2 acceptances to allow server processing...");
                     await Task.Delay(TimeSpan.FromSeconds(phase2DelaySeconds));
 
@@ -748,7 +780,7 @@ namespace Actions
                         if (!receiverAccount.IsValid || string.IsNullOrEmpty(receiverAccount.XcsrfToken))
                         {
                             Console.WriteLine($"            -> Skipping receiver (became invalid or lost token).");
-                            batchSkippedAccepts += (batchAccountCount > 2 ? 2 : 1);
+                            batchSkippedAccepts += batchAccountCount > 2 ? 2 : 1;
                             continue;
                         }
 
@@ -1004,7 +1036,7 @@ namespace Actions
                     }
                     else
                     {
-                        badgeCount = await _badgeService.GetBadgeCountAsync(acc, limit: apiLimitForBadges);
+                        badgeCount = await BadgeService.GetBadgeCountAsync(acc, limit: apiLimitForBadges);
 
                         if (badgeCount == -1)
                         {
@@ -1040,12 +1072,12 @@ namespace Actions
                     if (targetAvatarDetails != null)
                     {
                         Console.Write("   Checking Avatar... ");
-                        currentAvatarDetails = await _avatarService.FetchAvatarDetailsAsync(acc.UserId);
+                        currentAvatarDetails = await AvatarService.FetchAvatarDetailsAsync(acc.UserId);
                         if (currentAvatarDetails == null) { Console.WriteLine("Failed."); errorOccurred = true; failureReasons.Add("Avatar fetch API failed"); }
                         else
                         {
                             Console.WriteLine($"Details retrieved.");
-                            if (!_avatarService.CompareAvatarDetails(currentAvatarDetails, targetAvatarDetails)) failureReasons.Add("Avatar mismatch");
+                            if (!AvatarService.CompareAvatarDetails(currentAvatarDetails, targetAvatarDetails)) failureReasons.Add("Avatar mismatch");
                         }
                     }
                     else { Console.WriteLine("   Skipping Avatar Check (Target details unavailable/not specified)."); }
@@ -1064,7 +1096,7 @@ namespace Actions
                         bool badgesOk = requiredBadges <= 0 || badgeCount >= requiredBadges;
                         bool displayNameOk = string.Equals(currentDisplayName, expectedDisplayName, StringComparison.OrdinalIgnoreCase);
                         bool avatarOk = targetAvatarDetails == null ||
-                                        (currentAvatarDetails != null && _avatarService.CompareAvatarDetails(currentAvatarDetails, targetAvatarDetails));
+                                        currentAvatarDetails != null && AvatarService.CompareAvatarDetails(currentAvatarDetails, targetAvatarDetails);
 
                         string fStat = friendsOk ? "OK" : $"FAIL ({friendCount}/{requiredFriends})";
                         string bStat;
@@ -1142,7 +1174,7 @@ namespace Actions
             await SetAvatarOnSelectedAsync(currentAvatarSourceId);
 
             Console.WriteLine("\n--- Starting: Limited Friend Actions ---");
-            await HandleLimitedFriendRequestsAsync(currentFriendGoal);
+            await HandleFriendRequestsAsync(currentFriendGoal);
 
             Console.WriteLine("\n--- Starting: Get Badges ---");
 

@@ -53,13 +53,13 @@ namespace Continuance.Core
             {
                 if (_accounts.Any(a => a.Cookie == cookie))
                 {
-                    ConsoleUI.WriteErrorLine("Duplicate: This cookie is already in the roster.");
+                    ConsoleUI.WriteErrorLine("Duplicate: This cookie is already in the account pool.");
                     return false;
                 }
             }
 
             ConsoleUI.WriteInfoLine("Validating cookie integrity...");
-            var (isValid, userId, username) = await _authService.ValidateCookieAsync(cookie);
+            var (isValid, userId, username) = await AuthenticationService.ValidateCookieAsync(cookie);
 
             if (isValid && userId > 0)
             {
@@ -91,7 +91,7 @@ namespace Continuance.Core
 
                 if (newAccount.IsValid)
                 {
-                    ConsoleUI.WriteSuccessLine($"Account Secured & Added to roster. ({_accounts.Count} total)");
+                    ConsoleUI.WriteSuccessLine($"Account Secured & Added to Account Pool. ({_accounts.Count} total)");
                     return true;
                 }
                 else
@@ -216,9 +216,9 @@ namespace Continuance.Core
                         {
                             bool alreadyExists;
                             lock (_lock) { alreadyExists = _accounts.Any(a => a.Cookie == currentCookie); }
-                            if (alreadyExists) { resultMessage = $"Duplicate (already in roster)."; isDuplicate = true; return; }
+                            if (alreadyExists) { resultMessage = $"Duplicate (already in account pool)."; isDuplicate = true; return; }
 
-                            var (isValid, userId, username) = await _authService.ValidateCookieAsync(currentCookie);
+                            var (isValid, userId, username) = await AuthenticationService.ValidateCookieAsync(currentCookie);
                             if (isValid && userId > 0)
                             {
                                 finalUsername = username ?? "N/A";
@@ -261,10 +261,10 @@ namespace Continuance.Core
 
             Console.WriteLine($"\n---[ Import Summary ]---");
             ConsoleUI.WriteSuccessLine($"Added & Valid: {successCount}");
-            ConsoleUI.WriteErrorLine($"Duplicates Skipped (already in roster or race condition): {duplicateCount}");
+            ConsoleUI.WriteWarningLine($"Duplicates Skipped (already in account pool or race condition): {duplicateCount}");
             ConsoleUI.WriteErrorLine($"Invalid / Validation Failed: {invalidCount}");
             ConsoleUI.WriteErrorLine($"Valid Cookie but XCSRF Fetch Failed: {fetchFailCount}");
-            ConsoleUI.WriteInfoLine($"Total accounts in roster: {_accounts.Count}");
+            ConsoleUI.WriteInfoLine($"Total accounts in account pool: {_accounts.Count}");
             ConsoleUI.WriteInfoLine($"Total time: {stopwatch.ElapsedMilliseconds}ms ({stopwatch.Elapsed.TotalSeconds:F1}s)");
             Console.WriteLine($"------------------------");
         }
@@ -405,17 +405,11 @@ namespace Continuance.Core
             }
         }
 
-        public async Task<bool> ExportAccountsToFileAsync(string filePath)
+        public static async Task<bool> ExportAccountsToFileAsync(string filePath, List<Account> accountsToExport, bool sortByUsername = true)
         {
-            List<Account> accountsToExport;
-            lock (_lock)
+            if (accountsToExport == null || accountsToExport.Count == 0)
             {
-                accountsToExport = new List<Account>(_accounts);
-            }
-
-            if (accountsToExport.Count == 0)
-            {
-                ConsoleUI.WriteErrorLine("No accounts loaded to export.");
+                ConsoleUI.WriteErrorLine("No accounts provided or found matching the filter to export.");
                 return false;
             }
 
@@ -424,24 +418,32 @@ namespace Continuance.Core
 
             foreach (var account in accountsToExport)
             {
-                if (!string.IsNullOrWhiteSpace(account.Cookie) && !string.IsNullOrWhiteSpace(account.Username) && account.Username != "N/A")
+                if (account != null && !string.IsNullOrWhiteSpace(account.Cookie) && !string.IsNullOrWhiteSpace(account.Username) && account.Username != "N/A")
                 {
                     cookies.Add(account.Cookie);
                     usernames.Add(account.Username);
                 }
                 else
                 {
-                    ConsoleUI.WriteErrorLine($"Skipping account ID {account.UserId} from export due to missing cookie or username.");
+                    ConsoleUI.WriteErrorLine($"Skipping account ID {account?.UserId.ToString() ?? "Unknown"} from export due to missing cookie or username, or null account object.");
                 }
             }
 
             if (cookies.Count == 0)
             {
-                ConsoleUI.WriteErrorLine("No accounts with both valid cookies and usernames found to export.");
+                ConsoleUI.WriteErrorLine("No accounts with both valid cookies and usernames found in the provided list to export.");
                 return false;
             }
 
-            usernames.Sort(StringComparer.OrdinalIgnoreCase);
+            if (sortByUsername)
+            {
+                usernames.Sort(StringComparer.OrdinalIgnoreCase);
+                ConsoleUI.WriteInfoLine("   (Usernames will be sorted alphabetically)");
+            }
+            else
+            {
+                ConsoleUI.WriteInfoLine("   (Usernames will be kept in their provided order)");
+            }
 
             try
             {
@@ -461,7 +463,8 @@ namespace Continuance.Core
                         await writer.WriteLineAsync(username);
                     }
                 }
-                ConsoleUI.WriteSuccessLine($"Successfully exported {cookies.Count} cookies and usernames to: {filePath}");
+                string sortStatus = sortByUsername ? "sorted" : "original order";
+                ConsoleUI.WriteSuccessLine($"Successfully exported {cookies.Count} cookies and {sortStatus} usernames to: {filePath}");
                 return true;
             }
             catch (UnauthorizedAccessException)

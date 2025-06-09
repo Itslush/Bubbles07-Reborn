@@ -1,6 +1,5 @@
 ﻿using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
-using Continuance;
 using Continuance.Models;
 using Continuance.Roblox.Http;
 using Continuance.UI;
@@ -10,8 +9,9 @@ namespace Continuance.Roblox.Services
     public class BadgeService(RobloxHttpClient robloxHttpClient)
     {
         private readonly RobloxHttpClient _robloxHttpClient = robloxHttpClient ?? throw new ArgumentNullException(nameof(robloxHttpClient));
+        private static readonly int[] sourceArray = [10, 25, 50, 100];
 
-        public async Task<int> GetBadgeCountAsync(Account account, int limit = 10)
+        public static async Task<int> GetBadgeCountAsync(Account account, int limit = 10)
         {
             if (account == null)
             {
@@ -24,7 +24,7 @@ namespace Continuance.Roblox.Services
                 return -1;
             }
 
-            if (!new[] { 10, 25, 50, 100 }.Contains(limit))
+            if (!sourceArray.Contains(limit))
             {
                 ConsoleUI.WriteErrorLine($"[BadgeService] Invalid limit '{limit}' passed to GetBadgeCountAsync. Defaulting to 10.");
                 limit = 10;
@@ -32,7 +32,7 @@ namespace Continuance.Roblox.Services
 
             string url = $"{AppConfig.RobloxApiBaseUrl_Badges}/v1/users/{account.UserId}/badges?limit={limit}&sortOrder=Desc";
 
-            var (statusCode, success, content) = await _robloxHttpClient.SendRequestAndReadAsync(
+            var (statusCode, success, content) = await RobloxHttpClient.SendRequest(
                 HttpMethod.Get,
                 url,
                 account,
@@ -65,9 +65,7 @@ namespace Continuance.Roblox.Services
                     ConsoleUI.WriteErrorLine($"Error processing badge count response for {account.Username}: {ex.Message}");
                 }
             }
-            else if (!success)
-            {
-            }
+            else if (!success) { } 
             else
             {
                 ConsoleUI.WriteWarningLine($"Get Badge Count request succeeded but returned empty content for {account.Username}.");
@@ -97,11 +95,12 @@ namespace Continuance.Roblox.Services
 
 
             int checkCount = 0;
+            int initialBadgeCount = -1;
+            int apiLimitForMonitoring;
+
             const int maxChecks = 4;
             const int checkIntervalSeconds = 6;
-            int initialBadgeCount = -1;
 
-            int apiLimitForMonitoring;
             if (badgeGoal <= 0) apiLimitForMonitoring = 10;
             else if (badgeGoal <= 10) apiLimitForMonitoring = 10;
             else if (badgeGoal <= 25) apiLimitForMonitoring = 25;
@@ -110,10 +109,11 @@ namespace Continuance.Roblox.Services
 
             ConsoleUI.WriteInfoLine($"Monitoring badge acquisition for {account.Username} (Goal: {badgeGoal})...");
             ConsoleUI.WriteInfoLine($"    Checking every {checkIntervalSeconds}s up to {maxChecks} times (~{maxChecks * checkIntervalSeconds}s total).");
-            Console.WriteLine($"    Press Enter in console to stop monitoring early.");
+            Console.WriteLine($"    Press 'Q' in console to stop monitoring early.");
 
             Console.Write("[>] Performing initial badge check...");
             initialBadgeCount = await GetBadgeCountAsync(account, limit: apiLimitForMonitoring);
+
             if (initialBadgeCount != -1)
             {
                 ConsoleUI.WriteInfoLine($" Initial recent badges found: {initialBadgeCount} (checked up to {apiLimitForMonitoring})");
@@ -148,10 +148,10 @@ namespace Continuance.Roblox.Services
                     if (!cts.IsCancellationRequested)
                     {
                         var key = Console.ReadKey(intercept: true);
-                        if (key.Key == ConsoleKey.Enter)
+                        if (key.Key == ConsoleKey.Q)
                         {
                             stopWaitingFlag = true;
-                            ConsoleUI.WriteInfoLine($"\n[!] User pressed Enter. Aborting monitor.");
+                            ConsoleUI.WriteInfoLine($"\n[!] User pressed 'Q'. Aborting monitor.");
                             try { if (!cts.IsCancellationRequested) cts.Cancel(); } catch (ObjectDisposedException) { }
                         }
                     }
@@ -226,13 +226,16 @@ namespace Continuance.Roblox.Services
             try { cts.Dispose(); } catch { }
 
             if (stopWaitingFlag && !keyListener.IsCompleted) { }
+
             else if (checkCount >= maxChecks) { ConsoleUI.WriteWarningLine($"Max badge checks ({maxChecks}) reached for {account.Username}. Monitoring finished."); }
             else if (cts.IsCancellationRequested && !stopWaitingFlag) { }
 
-
             await Task.Delay(500);
+
             Console.Write("[>] Performing final badge count check...");
+
             int finalCount = await GetBadgeCountAsync(account, limit: apiLimitForMonitoring);
+
             if (finalCount != -1) ConsoleUI.WriteInfoLine($" Final recent badge count: {finalCount} (Goal was {badgeGoal}, checked up to {apiLimitForMonitoring})");
             else ConsoleUI.WriteErrorLine(" Final check failed.");
         }

@@ -1,5 +1,4 @@
-﻿using Continuance;
-using Actions;
+﻿using Continuance.Actions;
 using Continuance.Core;
 
 namespace Continuance.UI
@@ -14,7 +13,9 @@ namespace Continuance.UI
             long apiDelayMs = AppConfig.CurrentApiDelayMs;
             long friendDelayMs = AppConfig.CurrentFriendActionDelayMs;
             long retryDelayMs = AppConfig.CurrentApiRetryDelayMs;
+
             _ = AppConfig.CurrentMaxApiRetries;
+
             double retryChance = 0.1;
 
             long baseApiCallCost = 500;
@@ -27,7 +28,7 @@ namespace Continuance.UI
                 case 2:
                     return TimeSpan.FromMilliseconds(baseApiCallCost * 7 + retryOverhead * 5 + apiDelayMs * 5);
                 case 3:
-                    return TimeSpan.FromMilliseconds(baseApiCallCost + retryOverhead + apiDelayMs);
+                    return TimeSpan.Zero;
                 case 4:
                     return TimeSpan.Zero;
                 case 5:
@@ -39,9 +40,7 @@ namespace Continuance.UI
                 case 7:
                     return TimeSpan.FromMilliseconds(baseApiCallCost * 4 + apiDelayMs / 4 * 3 + apiDelayMs);
                 case 8:
-                    return EstimateActionTimePerAccount(1) +
-                           EstimateActionTimePerAccount(2) +
-                           EstimateActionTimePerAccount(5);
+                    return EstimateActionTimePerAccount(1) + EstimateActionTimePerAccount(2) + EstimateActionTimePerAccount(5);
                 default:
                     return TimeSpan.Zero;
             }
@@ -50,12 +49,12 @@ namespace Continuance.UI
         private static string FormatTimeEstimate(TimeSpan totalEstimate)
         {
             if (totalEstimate.TotalMilliseconds <= 0) return "";
-
             if (totalEstimate.TotalSeconds < 1) return "(< 1s)";
             if (totalEstimate.TotalSeconds < 60) return $"(~{totalEstimate.TotalSeconds:F0}s)";
             if (totalEstimate.TotalMinutes < 2) return $"(~{totalEstimate.TotalSeconds:F0}s)";
             if (totalEstimate.TotalMinutes < 60) return $"(~{totalEstimate.TotalMinutes:F1}m)";
             if (totalEstimate.TotalHours < 2) return $"(~{totalEstimate.TotalMinutes:F0}m)";
+
             return $"(~{totalEstimate.TotalHours:F1}h)";
         }
 
@@ -65,6 +64,7 @@ namespace Continuance.UI
 
             switch (actionChoice)
             {
+                case 3: return "(Interactive)";
                 case 4: return "(Interactive)";
                 case 6: return "(Interactive)";
                 case 5:
@@ -121,10 +121,10 @@ namespace Continuance.UI
 
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"1. Set Display Name (Default: '{AppConfig.RuntimeDefaultDisplayName}') {GetOverallEstimateString(1, validSelectedCount)}"));
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"2. Set Avatar (Default Src: {AppConfig.RuntimeDefaultTargetUserIdForAvatarCopy}) {GetOverallEstimateString(2, validSelectedCount)}"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"3. Join Group - CURRENTLY BROKEN DUE TO CAPTCHA (Default ID: {AppConfig.RuntimeDefaultGroupId}) {GetOverallEstimateString(3, validSelectedCount)}"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"3. Join Group (Interactive - Opens Browser for CAPTCHA) (Default ID: {AppConfig.RuntimeDefaultGroupId}) {GetOverallEstimateString(3, validSelectedCount)}"));
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"4. Get Badges (Game: {AppConfig.RuntimeDefaultBadgeGameId}, Goal: {AppConfig.RuntimeDefaultBadgeGoal}) {GetOverallEstimateString(4, validSelectedCount)}"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"5. Friend Actions - Limited (Goal: ~{AppConfig.RuntimeDefaultFriendGoal}) {GetOverallEstimateString(5, validSelectedCount)}"));
-                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"6. Open in Browser - OVERALL USELESS ATM {GetOverallEstimateString(6, validSelectedCount)}"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"5. Friend Accounts (Goal: ~{AppConfig.RuntimeDefaultFriendGoal}) {GetOverallEstimateString(5, validSelectedCount)}"));
+                ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"6. Open Accounts In Browser - OVERALL USELESS ATM {GetOverallEstimateString(6, validSelectedCount)}"));
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"7. Verify Check (Uses Current Defaults) {GetOverallEstimateString(7, validSelectedCount)}"));
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_Branch, $"8. Execute All Auto (1->2->5->4, Uses Defaults) {GetOverallEstimateString(8, validSelectedCount)}"));
                 ConsoleUI.WriteLineInsideBox(ConsoleUI.TreeLine(ConsoleUI.T_End, $"0. Back to Main Menu"));
@@ -145,8 +145,10 @@ namespace Continuance.UI
                     case "1":
                         {
                             string currentDefaultName = AppConfig.RuntimeDefaultDisplayName;
+
                             ConsoleUI.WriteInfoLine($"Current default display name: '{currentDefaultName}'");
                             Console.Write($"{ConsoleUI.T_Vertical}   Enter new name for this run (or press Enter to use default): ");
+
                             string? nameOverride = Console.ReadLine();
                             string nameToUse = string.IsNullOrWhiteSpace(nameOverride) ? currentDefaultName : nameOverride.Trim();
 
@@ -165,6 +167,7 @@ namespace Continuance.UI
                         {
                             long currentDefaultSourceId = AppConfig.RuntimeDefaultTargetUserIdForAvatarCopy;
                             ConsoleUI.WriteInfoLine($"Current default avatar source User ID: {currentDefaultSourceId}");
+
                             long sourceIdToUse = GetLongInput($"[?] Enter source User ID for this run (or blank for default):", currentDefaultSourceId, 1);
                             if (sourceIdToUse <= 0)
                             {
@@ -179,8 +182,15 @@ namespace Continuance.UI
                         break;
                     case "3":
                         {
+                            if (!Environment.UserInteractive)
+                            {
+                                ConsoleUI.WriteErrorLine("Join Group (Interactive) action requires an interactive environment.");
+                                break;
+                            }
+
                             long currentDefaultGroupId = AppConfig.RuntimeDefaultGroupId;
                             ConsoleUI.WriteInfoLine($"Current default Group ID: {currentDefaultGroupId}");
+
                             long groupIdToUse = GetLongInput($"[?] Enter Group ID for this run (or blank for default):", currentDefaultGroupId, 1);
 
                             if (groupIdToUse <= 0)
@@ -189,8 +199,8 @@ namespace Continuance.UI
                             }
                             else
                             {
-                                ConsoleUI.WriteInfoLine($"Executing JoinGroup with Group ID: {groupIdToUse}");
-                                await _actionExecutor.JoinGroupOnSelectedAsync(groupIdToUse);
+                                ConsoleUI.WriteInfoLine($"Executing Interactive JoinGroup with Group ID: {groupIdToUse}");
+                                await _actionExecutor.JoinGroupInteractiveOnSelectedAsync(groupIdToUse);
                             }
                         }
                         break;
@@ -231,6 +241,7 @@ namespace Continuance.UI
                         {
                             int currentFriendGoal = AppConfig.RuntimeDefaultFriendGoal;
                             ConsoleUI.WriteInfoLine($"Current default friend goal: {currentFriendGoal}");
+
                             int friendGoalToUse = GetIntInput($"[?] Enter target friend count for this run (or blank for default): ", currentFriendGoal, 0);
 
                             if (friendGoalToUse < 0)
@@ -240,7 +251,7 @@ namespace Continuance.UI
                             else if (friendGoalToUse < 2 && validSelectedCount >= 2)
                             {
                                 ConsoleUI.WriteWarningLine("Friend goal less than 2 might not be very effective for this action.");
-                                await _actionExecutor.HandleLimitedFriendRequestsAsync(friendGoalToUse);
+                                await _actionExecutor.HandleFriendRequestsAsync(friendGoalToUse);
                             }
                             else if (validSelectedCount < 2)
                             {
@@ -249,7 +260,7 @@ namespace Continuance.UI
                             else
                             {
                                 ConsoleUI.WriteInfoLine($"Executing Limited Friend Actions with goal: {friendGoalToUse}");
-                                await _actionExecutor.HandleLimitedFriendRequestsAsync(friendGoalToUse);
+                                await _actionExecutor.HandleFriendRequestsAsync(friendGoalToUse);
                             }
                         }
                         break;
@@ -305,10 +316,10 @@ namespace Continuance.UI
             Console.Clear();
         }
 
-
         private static int GetIntInput(string prompt, int defaultValue, int? minValue = null, int? maxValue = null)
         {
             Console.Write(prompt + " ");
+
             string? input = Console.ReadLine();
             bool parsed = int.TryParse(input, out int parsedValue);
 
@@ -339,6 +350,7 @@ namespace Continuance.UI
         private static long GetLongInput(string prompt, long defaultValue, long? minValue = null, long? maxValue = null)
         {
             Console.Write(prompt + " ");
+
             string? input = Console.ReadLine();
             bool parsed = long.TryParse(input, out long parsedValue);
 
@@ -377,7 +389,6 @@ namespace Continuance.UI
             return input.Trim();
         }
 
-
         public static void AdjustRateLimitsUI()
         {
             Console.Clear();
@@ -389,7 +400,9 @@ namespace Continuance.UI
 
             ConsoleUI.WriteLineInsideBox($"1. General API Delay (Between accounts/steps):");
             ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentApiDelayMs}ms / Default Const: {AppConfig.DefaultApiDelayMs}ms");
+
             int newApiDelay = GetIntInput($"[?] New delay (ms, >= {AppConfig.MinAllowedDelayMs}) or blank: ", AppConfig.CurrentApiDelayMs, AppConfig.MinAllowedDelayMs);
+
             if (newApiDelay != AppConfig.CurrentApiDelayMs)
             {
                 AppConfig.CurrentApiDelayMs = newApiDelay;
@@ -399,7 +412,9 @@ namespace Continuance.UI
 
             ConsoleUI.WriteLineInsideBox($"\n2. Friend Action Delay (Send/Accept):");
             ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentFriendActionDelayMs}ms / Default Const: {AppConfig.DefaultFriendActionDelayMs}ms");
+
             int newFriendDelay = GetIntInput($"[?] New delay (ms, >= {AppConfig.MinAllowedDelayMs}) or blank: ", AppConfig.CurrentFriendActionDelayMs, AppConfig.MinAllowedDelayMs);
+
             if (newFriendDelay != AppConfig.CurrentFriendActionDelayMs)
             {
                 AppConfig.CurrentFriendActionDelayMs = newFriendDelay;
@@ -409,7 +424,9 @@ namespace Continuance.UI
 
             ConsoleUI.WriteLineInsideBox($"\n3. Request Timeout (Max wait for API response):");
             ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.DefaultRequestTimeoutSec}s / Default Const: {AppConfig.DefaultRequestTimeoutSec}s");
+
             int newTimeoutSec = GetIntInput($"[?] New timeout (seconds, 5-120) or blank: ", AppConfig.DefaultRequestTimeoutSec, 5, 120);
+
             if (newTimeoutSec != AppConfig.DefaultRequestTimeoutSec)
             {
                 AppConfig.DefaultRequestTimeoutSec = newTimeoutSec;
@@ -419,7 +436,9 @@ namespace Continuance.UI
 
             ConsoleUI.WriteLineInsideBox($"\n4. Max Action Retries (Attempts after initial failure):");
             ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentMaxApiRetries} / Default Const: {AppConfig.DefaultMaxApiRetries}");
+
             int newMaxRetries = GetIntInput($"[?] New max retries (0+) or blank: ", AppConfig.CurrentMaxApiRetries, 0);
+
             if (newMaxRetries != AppConfig.CurrentMaxApiRetries)
             {
                 AppConfig.CurrentMaxApiRetries = newMaxRetries;
@@ -429,7 +448,9 @@ namespace Continuance.UI
 
             ConsoleUI.WriteLineInsideBox($"\n5. Action Retry Delay (Wait between retries):");
             ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentApiRetryDelayMs}ms / Default Const: {AppConfig.DefaultApiRetryDelayMs}ms");
+
             int newRetryDelay = GetIntInput($"[?] New retry delay (ms, >= {AppConfig.MinRetryDelayMs}) or blank: ", AppConfig.CurrentApiRetryDelayMs, AppConfig.MinRetryDelayMs);
+
             if (newRetryDelay != AppConfig.CurrentApiRetryDelayMs)
             {
                 AppConfig.CurrentApiRetryDelayMs = newRetryDelay;
@@ -439,7 +460,9 @@ namespace Continuance.UI
 
             ConsoleUI.WriteLineInsideBox($"\n6. Action Confirmation Threshold (Accounts count to ask 'Proceed?'):");
             ConsoleUI.WriteLineInsideBox($"   Current: {AppConfig.CurrentActionConfirmationThreshold} / Default: 15");
+
             int newThreshold = GetIntInput($"[?] New threshold (0 = always ask, high number = never ask) or blank: ", AppConfig.CurrentActionConfirmationThreshold, 0);
+
             if (newThreshold != AppConfig.CurrentActionConfirmationThreshold)
             {
                 AppConfig.CurrentActionConfirmationThreshold = newThreshold;

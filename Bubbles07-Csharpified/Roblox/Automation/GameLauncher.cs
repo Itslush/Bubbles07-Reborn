@@ -6,7 +6,6 @@ using Continuance.Models;
 using Continuance.Roblox.Services;
 using Continuance.UI;
 
-
 namespace Continuance.Roblox.Automation
 {
     public class GameLauncher(AuthenticationService authService, BadgeService badgeService)
@@ -33,7 +32,7 @@ namespace Continuance.Roblox.Automation
             }
 
             ConsoleUI.WriteInfoLine($"   Refreshing XCSRF for {account.Username} before getting auth ticket...");
-            bool tokenRefreshed = await _authService.RefreshXCSRFTokenIfNeededAsync(account);
+            bool tokenRefreshed = await AuthenticationService.RefreshXCSRFTokenIfNeededAsync(account);
             if (!tokenRefreshed || string.IsNullOrEmpty(account.XcsrfToken))
             {
                 ConsoleUI.WriteErrorLine($"   Failed to refresh XCSRF token for {account.Username}. Cannot proceed with game launch.");
@@ -58,10 +57,12 @@ namespace Continuance.Roblox.Automation
 
             long browserTrackerId = Random.Shared.NextInt64(10_000_000_000L, 100_000_000_000L);
             long launchTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
             string placeLauncherUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame&browserTrackerId={browserTrackerId}&placeId={gameId}&isPlayTogetherGame=false&joinAttemptId={Guid.NewGuid()}&joinAttemptOrigin=PlayButton";
             string encodedPlaceLauncherUrl = HttpUtility.UrlEncode(placeLauncherUrl);
 
             var launchUrlBuilder = new StringBuilder("roblox-player:1");
+
             launchUrlBuilder.Append("+launchmode:play");
             launchUrlBuilder.Append("+gameinfo:").Append(authTicket);
             launchUrlBuilder.Append("+launchtime:").Append(launchTime);
@@ -69,8 +70,10 @@ namespace Continuance.Roblox.Automation
             launchUrlBuilder.Append("+browsertrackerid:").Append(browserTrackerId);
             launchUrlBuilder.Append("+robloxLocale:en_us");
             launchUrlBuilder.Append("+gameLocale:en_us");
+
             string launchUrl = launchUrlBuilder.ToString();
             bool launchCommandSent;
+
             try
             {
                 ConsoleUI.WriteInfoLine($"   Dispatching launch command for Roblox Player...");
@@ -113,6 +116,7 @@ namespace Continuance.Roblox.Automation
 
             ConsoleUI.WriteInfoLine($"   Attempting automatic termination of Roblox Player instances...");
             int closedCount = 0;
+
             try
             {
                 string[] processNames = { "RobloxPlayerBeta", "RobloxPlayerLauncher", "RobloxPlayer" };
@@ -131,8 +135,8 @@ namespace Continuance.Roblox.Automation
                     catch { return false; }
                 }).ToList();
 
-
                 if (robloxProcesses.Count == 0) { Console.WriteLine($"   [-] No active Roblox Player processes found to terminate."); }
+
                 else
                 {
                     Console.WriteLine($"   [>] Found {robloxProcesses.Count} potential Roblox process(es). Attempting to close...");
@@ -152,7 +156,9 @@ namespace Continuance.Roblox.Automation
                                 }
                                 else
                                 {
-                                    try { if (process.HasExited) { Console.WriteLine($" Terminated (late)."); closedCount++; } else { Console.WriteLine($" Still running?"); } } catch { Console.WriteLine(" Status Unknown."); }
+                                    try { if (process.HasExited) { Console.WriteLine($" Terminated (late)."); closedCount++; } 
+                                    else { Console.WriteLine($" Still running?"); } } 
+                                    catch { Console.WriteLine(" Status Unknown."); }
                                 }
                             }
                         }
@@ -160,6 +166,7 @@ namespace Continuance.Roblox.Automation
                         catch (Win32Exception ex) { Console.WriteLine($" Error: {ex.Message} (Access Denied? Permissions issue?)"); }
                         catch (NotSupportedException) { Console.WriteLine($" Error: Killing process tree not supported on this platform/process?"); }
                         catch (Exception ex) { Console.WriteLine($" Error interacting with process: {ex.Message}"); }
+
                         finally
                         {
                             process.Dispose();

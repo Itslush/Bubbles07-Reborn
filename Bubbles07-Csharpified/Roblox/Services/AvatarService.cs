@@ -1,23 +1,17 @@
 ﻿using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
 using System.Text;
-using Continuance;
 using Continuance.Models;
 using Continuance.Roblox.Http;
 using Continuance.UI;
 
 namespace Continuance.Roblox.Services
 {
-    public class AvatarService
+    public class AvatarService(RobloxHttpClient robloxHttpClient)
     {
-        private readonly RobloxHttpClient _robloxHttpClient;
+        private readonly RobloxHttpClient _robloxHttpClient = robloxHttpClient ?? throw new ArgumentNullException(nameof(robloxHttpClient));
 
-        public AvatarService(RobloxHttpClient robloxHttpClient)
-        {
-            _robloxHttpClient = robloxHttpClient ?? throw new ArgumentNullException(nameof(robloxHttpClient));
-        }
-
-        public async Task<AvatarDetails?> FetchAvatarDetailsAsync(long userId)
+        public static async Task<AvatarDetails?> FetchAvatarDetailsAsync(long userId)
         {
             if (userId <= 0)
             {
@@ -223,7 +217,7 @@ namespace Continuance.Roblox.Services
             return overallSuccess;
         }
 
-        public bool CompareAvatarDetails(AvatarDetails? details1, AvatarDetails? details2)
+        public static bool CompareAvatarDetails(AvatarDetails? details1, AvatarDetails? details2)
         {
             if (ReferenceEquals(details1, details2)) return true;
             if (details1 == null || details2 == null) return false;

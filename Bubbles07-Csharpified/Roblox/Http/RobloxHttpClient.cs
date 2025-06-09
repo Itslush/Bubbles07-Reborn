@@ -50,7 +50,7 @@ namespace Continuance.Roblox.Http
             return request;
         }
 
-        public async Task<(HttpStatusCode? StatusCode, bool IsSuccess, string Content)> SendRequestAndReadAsync(
+        public static async Task<(HttpStatusCode? StatusCode, bool IsSuccess, string Content)> SendRequest(
             HttpMethod method,
             string url,
             Account account,
@@ -66,6 +66,7 @@ namespace Continuance.Roblox.Http
             }
 
             HttpRequestMessage request;
+
             try
             {
                 request = CreateBaseRequest(method, url, account!, content);
@@ -83,7 +84,7 @@ namespace Continuance.Roblox.Http
             }
 
             bool retried = false;
-        retry_request:
+            retry_request:
             HttpResponseMessage? response = null;
 
             try
@@ -188,7 +189,7 @@ namespace Continuance.Roblox.Http
             bool allowRetryOnXcsrf = true,
             Action<HttpRequestMessage>? configureRequest = null)
         {
-            var (_, isSuccess, _) = await SendRequestAndReadAsync(method, url, account, content, actionDescription, allowRetryOnXcsrf, configureRequest);
+            var (_, isSuccess, _) = await SendRequest(method, url, account, content, actionDescription, allowRetryOnXcsrf, configureRequest);
             return isSuccess;
         }
 
@@ -284,17 +285,20 @@ namespace Continuance.Roblox.Http
             catch (OperationCanceledException) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST /logout) timeout."); }
             catch (HttpRequestException hrex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST /logout) network exception: {hrex.Message}"); }
             catch (Exception ex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST /logout) exception: {ex.GetType().Name} - {ex.Message}"); }
+
             finally { response?.Dispose(); }
 
 
             string bdayUrl = AppConfig.RobloxApiBaseUrl_AccountInfo + "/v1/birthdate";
             using var bdayReq = new HttpRequestMessage(HttpMethod.Post, bdayUrl);
+
             bdayReq.Headers.TryAddWithoutValidation("Cookie", $".ROBLOSECURITY={cookie}");
             bdayReq.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", "fetch");
             bdayReq.Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
             bdayReq.Headers.UserAgent.ParseAdd("Roblox/WinInet");
 
             response = null;
+
             try
             {
                 using var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -310,11 +314,12 @@ namespace Continuance.Roblox.Http
                 }
                 ConsoleUI.WriteErrorLine($"POST {bdayUrl} failed or didn't return token ({response?.StatusCode ?? HttpStatusCode.Unused}). Trying scrape...");
             }
+
             catch (OperationCanceledException) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST {bdayUrl}) timeout."); }
             catch (HttpRequestException hrex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST {bdayUrl}) network exception: {hrex.Message}"); }
             catch (Exception ex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST {bdayUrl}) exception: {ex.GetType().Name} - {ex.Message}"); }
-            finally { response?.Dispose(); }
 
+            finally { response?.Dispose(); }
 
             string scrapeUrl = AppConfig.RobloxWebBaseUrl + "/my/account";
             using var getReq = new HttpRequestMessage(HttpMethod.Get, scrapeUrl);
@@ -326,6 +331,7 @@ namespace Continuance.Roblox.Http
             {
                 using var cts3 = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 response = await httpClient.SendAsync(getReq, cts3.Token);
+
                 if (response.IsSuccessStatusCode)
                 {
                     string html = await response.Content.ReadAsStringAsync();
@@ -355,12 +361,15 @@ namespace Continuance.Roblox.Http
                 }
                 else { ConsoleUI.WriteErrorLine($"Scrape failed ({response.StatusCode})."); }
             }
+
             catch (OperationCanceledException) { ConsoleUI.WriteErrorLine($"XCSRF fetch (Scrape) timeout."); }
             catch (HttpRequestException hrex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (Scrape) network exception: {hrex.Message}"); }
             catch (Exception ex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (Scrape) exception: {ex.GetType().Name} - {ex.Message}"); }
+
             finally { response?.Dispose(); }
 
             ConsoleUI.WriteErrorLine("Failed to acquire XCSRF Token using all methods.");
+
             return "";
         }
     }

@@ -4,7 +4,7 @@
     {
         public static HttpRequestMessage Clone(this HttpRequestMessage req)
         {
-            HttpRequestMessage clone = new HttpRequestMessage(req.Method, req.RequestUri);
+            HttpRequestMessage clone = new(req.Method, req.RequestUri);
 
             if (req.Content != null)
             {
@@ -24,12 +24,14 @@
 
             clone.Version = req.Version;
 
-#if NET5_0_OR_GREATER
+            #if NET5_0_OR_GREATER
+
             foreach (KeyValuePair<string, object?> option in req.Options)
             {
                 if (option.Value != null) clone.Options.TryAdd(option.Key, option.Value);
             }
-#endif
+
+            #endif
 
             foreach (KeyValuePair<string, IEnumerable<string>> header in req.Headers)
             {
